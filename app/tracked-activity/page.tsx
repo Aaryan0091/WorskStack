@@ -1,26 +1,35 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { Card, CardContent } from '@/components/ui/card'
 import type { TabActivity } from '@/lib/types'
 
+const ACTIVITIES_PER_PAGE = 50
+
 export default function TrackedActivityPage() {
   const router = useRouter()
   const [activities, setActivities] = useState<TabActivity[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0])
   const [userId, setUserId] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
+  const observerTarget = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     getCurrentUser()
   }, [])
 
+  // Reset and fetch new activities when date changes
   useEffect(() => {
     if (userId) {
-      fetchActivities()
+      setActivities([])
+      setPage(0)
+      setHasMore(true)
+      fetchActivities(0, true)
     }
   }, [userId, filterDate])
 
@@ -33,10 +42,14 @@ export default function TrackedActivityPage() {
     }
   }
 
-  const fetchActivities = async () => {
+  const fetchActivities = async (pageNum: number, reset = false) => {
     if (!userId) return
 
-    // Get activities for the selected date
+    if (reset) {
+      setLoading(true)
+    }
+
+    const startIndex = pageNum * ACTIVITIES_PER_PAGE
     const startDate = new Date(filterDate + 'T00:00:00').toISOString()
     const endDate = new Date(filterDate + 'T23:59:59').toISOString()
 
@@ -47,12 +60,44 @@ export default function TrackedActivityPage() {
       .gte('started_at', startDate)
       .lte('started_at', endDate)
       .order('started_at', { ascending: false })
+      .range(startIndex, startIndex + ACTIVITIES_PER_PAGE - 1)
 
     if (!error && data) {
-      setActivities(data)
+      if (reset) {
+        setActivities(data)
+      } else {
+        setActivities(prev => [...prev, ...data])
+      }
+      setHasMore(data.length === ACTIVITIES_PER_PAGE)
     }
+
     setLoading(false)
   }
+
+  // Infinite scroll observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loading) {
+          const nextPage = page + 1
+          setPage(nextPage)
+          fetchActivities(nextPage)
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    const currentTarget = observerTarget.current
+    if (currentTarget) {
+      observer.observe(currentTarget)
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget)
+      }
+    }
+  }, [hasMore, loading, page])
 
   // Calculate statistics
   const totalTabs = activities.length
@@ -107,23 +152,23 @@ export default function TrackedActivityPage() {
           />
         </div>
 
-        {/* Stats */}
+        {/* Stats - Show immediately with current data */}
         <div className="grid grid-cols-3 gap-4">
           <Card>
             <CardContent className="p-6 text-center">
-              <p className="text-3xl font-bold text-blue-600">{loading ? '...' : totalTabs}</p>
+              <p className="text-3xl font-bold text-blue-600">{totalTabs}</p>
               <p style={{ color: 'var(--text-secondary)' }}>Tabs Opened</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-6 text-center">
-              <p className="text-3xl font-bold text-green-600">{loading ? '...' : totalMinutes}</p>
+              <p className="text-3xl font-bold text-green-600">{totalMinutes}</p>
               <p style={{ color: 'var(--text-secondary)' }}>Minutes Tracked</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-6 text-center">
-              <p className="text-3xl font-bold text-purple-600">{loading ? '...' : totalHours}</p>
+              <p className="text-3xl font-bold text-purple-600">{totalHours}</p>
               <p style={{ color: 'var(--text-secondary)' }}>Hours Total</p>
             </CardContent>
           </Card>
@@ -142,6 +187,7 @@ export default function TrackedActivityPage() {
                         src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
                         className="w-5 h-5 rounded"
                         alt=""
+                        loading="lazy"
                       />
                       <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{domain}</span>
                     </div>
@@ -156,8 +202,8 @@ export default function TrackedActivityPage() {
           </Card>
         )}
 
-        {/* Activity List */}
-        {loading ? (
+        {/* Activity List with infinite scroll */}
+        {loading && activities.length === 0 ? (
           <div className="space-y-3">
             {[1, 2, 3, 4, 5].map(i => (
               <div key={i} className="p-4 rounded-lg animate-pulse" style={{ backgroundColor: 'var(--bg-secondary)' }} />
@@ -172,7 +218,12 @@ export default function TrackedActivityPage() {
         ) : (
           <Card>
             <CardContent className="p-6">
-              <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Activity Timeline</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Activity Timeline</h2>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  Showing {activities.length} {activities.length === 1 ? 'entry' : 'entries'}
+                </span>
+              </div>
               <div className="space-y-3">
                 {activities.map(activity => (
                   <div
@@ -185,6 +236,7 @@ export default function TrackedActivityPage() {
                         src={`https://www.google.com/s2/favicons?domain=${activity.domain}&sz=32`}
                         className="w-8 h-8 rounded"
                         alt=""
+                        loading="lazy"
                       />
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
@@ -200,6 +252,15 @@ export default function TrackedActivityPage() {
                   </div>
                 ))}
               </div>
+
+              {/* Load more indicator / observer target */}
+              {hasMore && (
+                <div ref={observerTarget} className="py-4 text-center">
+                  {loading && (
+                    <div className="inline-block w-6 h-6 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

@@ -2,7 +2,7 @@ import { updateSession } from '@/lib/middleware'
 import { NextResponse } from 'next/server'
 
 // Skip middleware for these paths
-const skipPaths = ['/login', '/register', '/share', '/_next', '/api/auth']
+const skipPaths = ['/login', '/register', '/share', '/_next', '/api/auth', '/api']
 
 export async function proxy(request: any) {
   const { pathname } = request.nextUrl

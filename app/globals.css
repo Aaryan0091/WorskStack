@@ -25,4 +25,32 @@ body {
   color: var(--text-primary);
   font-family: Arial, Helvetica, sans-serif;
   min-height: 100vh;
+  /* Performance optimizations */
+  text-rendering: optimizeSpeed;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Improve rendering performance for cards and containers */
+@supports (content-visibility: auto) {
+  .card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+  }
+}
+
+/* Optimize images */
+img {
+  content-visibility: auto;
 }

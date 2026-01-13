@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { DashboardLayout } from '@/components/dashboard-layout'
@@ -27,6 +27,7 @@ export function BookmarksClient({ bookmarks: initialBookmarks, folders, tags, bo
   const [bookmarkTags, setBookmarkTags] = useState(initialBookmarkTags)
 
   const [modalOpen, setModalOpen] = useState(false)
+  const [folderModalOpen, setFolderModalOpen] = useState(false)
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -39,6 +40,31 @@ export function BookmarksClient({ bookmarks: initialBookmarks, folders, tags, bo
     tag_ids: [] as string[],
   })
   const [tagInput, setTagInput] = useState('')
+  const [folderName, setFolderName] = useState('')
+  const processedUrlParams = useRef(false)
+
+  // Handle URL parameters from extension popup
+  useEffect(() => {
+    const addUrl = searchParams.get('addUrl')
+    const addTitle = searchParams.get('addTitle')
+
+    if (addUrl && !processedUrlParams.current) {
+      processedUrlParams.current = true
+      // Pre-fill form and open modal
+      setFormData({
+        url: decodeURIComponent(addUrl),
+        title: addTitle ? decodeURIComponent(addTitle) : '',
+        description: '',
+        notes: '',
+        folder_id: '',
+        tag_ids: [],
+      })
+      setModalOpen(true)
+
+      // Clear URL params
+      window.history.replaceState({}, '', '/bookmarks')
+    }
+  }, [searchParams])
 
   const filteredBookmarks = bookmarks.filter(b => {
     const matchesSearch =
@@ -46,7 +72,14 @@ export function BookmarksClient({ bookmarks: initialBookmarks, folders, tags, bo
       b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       b.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       b.url.toLowerCase().includes(searchQuery.toLowerCase())
-    return matchesSearch
+
+    const favoriteFilter = searchParams.get('favorite')
+    const matchesFavorite = favoriteFilter !== 'true' || b.is_favorite
+
+    const folderFilter = searchParams.get('folder')
+    const matchesFolder = !folderFilter || b.folder_id === folderFilter
+
+    return matchesSearch && matchesFavorite && matchesFolder
   })
 
   const updateFilter = (key: string, value: string) => {
@@ -144,16 +177,22 @@ export function BookmarksClient({ bookmarks: initialBookmarks, folders, tags, bo
   }
 
   const createFolder = async () => {
-    const name = prompt('Folder name:')
-    if (!name) return
+    if (!folderName.trim()) return
+
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const { data } = await supabase.from('folders').insert({ name, user_id: user.id }).select()
+    const { data } = await supabase.from('folders').insert({ name: folderName.trim(), user_id: user.id }).select()
     if (data) {
-      folders.push(data[0])
+      setFolderName('')
+      setFolderModalOpen(false)
       router.refresh()
     }
+  }
+
+  const openFolderModal = () => {
+    setFolderName('')
+    setFolderModalOpen(true)
   }
 
   return (
@@ -191,12 +230,12 @@ export function BookmarksClient({ bookmarks: initialBookmarks, folders, tags, bo
               const current = searchParams.get('favorite')
               updateFilter('favorite', current === 'true' ? '' : 'true')
             }}
-            className={`px-4 py-2 rounded-lg transition-all duration-75 active:scale-90 ${searchParams.get('favorite') === 'true' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-700'}`}
-            style={{ cursor: 'pointer' }}
+            className={`px-4 py-2 rounded-lg font-medium transition-all duration-75 active:scale-90 ${searchParams.get('favorite') === 'true' ? 'bg-yellow-100 text-yellow-800' : ''}`}
+            style={{ cursor: 'pointer', backgroundColor: searchParams.get('favorite') === 'true' ? undefined : 'var(--bg-secondary)', color: searchParams.get('favorite') === 'true' ? undefined : 'var(--text-primary)' }}
           >
             {searchParams.get('favorite') === 'true' ? '⭐ Favorites' : 'Favorites'}
           </button>
-          <Button variant="secondary" onClick={createFolder}>+ New Folder</Button>
+          <Button variant="secondary" onClick={openFolderModal}>+ New Folder</Button>
         </div>
 
         {/* Bookmarks Grid */}
@@ -366,6 +405,24 @@ export function BookmarksClient({ bookmarks: initialBookmarks, folders, tags, bo
           <div className="flex gap-3 pt-2">
             <Button type="button" variant="secondary" onClick={closeModal} className="flex-1">Cancel</Button>
             <Button type="submit" className="flex-1">{editingBookmark ? 'Update' : 'Add'} Bookmark</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* New Folder Modal */}
+      <Modal isOpen={folderModalOpen} onClose={() => setFolderModalOpen(false)} title="New Folder">
+        <form onSubmit={createFolder} className="space-y-4">
+          <Input
+            label="Folder Name"
+            placeholder="My Folder"
+            value={folderName}
+            onChange={(e) => setFolderName(e.target.value)}
+            required
+            autoFocus
+          />
+          <div className="flex gap-3 pt-2">
+            <Button type="button" variant="secondary" onClick={() => setFolderModalOpen(false)} className="flex-1">Cancel</Button>
+            <Button type="submit" className="flex-1">Create Folder</Button>
           </div>
         </form>
       </Modal>

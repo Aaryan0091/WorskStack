@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import type { Collection, Bookmark } from '@/lib/types'
 
 export function CollectionsContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [collections, setCollections] = useState<Collection[]>([])
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
 
@@ -36,6 +37,21 @@ export function CollectionsContent() {
     }
     fetchData()
   }, [])
+
+  // Handle URL parameters from extension popup
+  useEffect(() => {
+    const addUrl = searchParams.get('addUrl')
+    const addTitle = searchParams.get('addTitle')
+
+    if (addUrl && collections.length > 0) {
+      // Open add modal with first collection selected
+      setSelectedCollection(collections[0])
+      setAddModalOpen(true)
+
+      // Clear URL params
+      window.history.replaceState({}, '', '/collections')
+    }
+  }, [collections.length])
 
   const createCollection = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -105,7 +121,7 @@ export function CollectionsContent() {
           {collections.map(collection => {
             const collectionBookmarks = getCollectionBookmarks(collection.id)
             return (
-              <Card key={collection.id} className="overflow-hidden">
+              <Card key={collection.id} className="overflow-hidden cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg">
                 <div className={`h-2 ${collection.is_public ? 'bg-green-500' : 'bg-gray-300'}`} />
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between mb-4">
@@ -209,7 +225,7 @@ export function CollectionsContent() {
               onChange={(e) => setFormData({ ...formData, is_public: e.target.checked })}
               className="w-4 h-4 rounded"
             />
-            <span className="text-sm" style={{ color: 'var(--text-primary)' }}>Make public (shareable)</span>
+            <span className="text-sm text-gray-900 dark:text-gray-100">Make public (shareable)</span>
           </label>
           <div className="flex gap-3 pt-2">
             <Button type="button" variant="secondary" onClick={() => setModalOpen(false)} className="flex-1">

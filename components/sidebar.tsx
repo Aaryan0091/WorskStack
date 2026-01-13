@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from 'next-themes'
 
@@ -20,6 +20,24 @@ const navItems: NavItem[] = [
   { href: '/tracked-activity', label: 'Tracked Activity', icon: '📊' },
 ]
 
+// Simple cache for user email to avoid repeated fetches
+let cachedEmail: string | null = null
+let emailFetchInProgress = false
+
+async function getCachedEmail(): Promise<string | null> {
+  if (cachedEmail) return cachedEmail
+  if (emailFetchInProgress) return null
+
+  emailFetchInProgress = true
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    cachedEmail = user?.email || null
+    return cachedEmail
+  } finally {
+    emailFetchInProgress = false
+  }
+}
+
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
@@ -29,13 +47,11 @@ export function Sidebar() {
 
   useEffect(() => {
     setMounted(true)
-    getUserEmail()
+    // Use cached email to avoid repeated fetches
+    getCachedEmail().then(e => {
+      if (e) setEmail(e)
+    })
   }, [])
-
-  const getUserEmail = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) setEmail(user.email || '')
-  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
