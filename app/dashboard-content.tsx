@@ -7,6 +7,7 @@ import { DashboardLayout } from '@/components/dashboard-layout'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
+import { BookmarkMenu } from '@/components/bookmark-menu'
 import type { Bookmark, Collection } from '@/lib/types'
 
 const EXTENSION_ID = 'llahljdmcglglkcaadldnbpcpnkdinco'
@@ -246,6 +247,25 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     })
   }
 
+  // Bookmark action functions
+  const toggleFavorite = async (bookmark: Bookmark) => {
+    await supabase.from('bookmarks').update({ is_favorite: !bookmark.is_favorite }).eq('id', bookmark.id)
+    setBookmarks(bookmarks.map(b => b.id === bookmark.id ? { ...b, is_favorite: !b.is_favorite } : b))
+    fetchFreshData()
+  }
+
+  const toggleRead = async (bookmark: Bookmark) => {
+    await supabase.from('bookmarks').update({ is_read: !bookmark.is_read }).eq('id', bookmark.id)
+    setBookmarks(bookmarks.map(b => b.id === bookmark.id ? { ...b, is_read: !b.is_read } : b))
+    fetchFreshData()
+  }
+
+  const deleteBookmark = async (id: string) => {
+    await supabase.from('bookmarks').delete().eq('id', id)
+    setBookmarks(bookmarks.filter(b => b.id !== id))
+    fetchFreshData()
+  }
+
   const stats = {
     total: totalBookmarks,
     unread: bookmarks.filter(b => !b.is_read).length,
@@ -479,28 +499,36 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
           ) : (
             <div className="space-y-3">
               {bookmarks.map(bookmark => (
-                <Card key={bookmark.id} className="hover:shadow-md transition-all duration-75 hover:scale-[1.02] active:scale-100" style={{ cursor: 'pointer' }}>
+                <Card
+                  key={bookmark.id}
+                  className="hover:shadow-md transition-all duration-75 hover:scale-[1.02] active:scale-100 cursor-pointer"
+                  onClick={() => window.open(bookmark.url, '_blank')}
+                >
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
                       <img
                         src={`https://www.google.com/s2/favicons?domain=${new URL(bookmark.url).hostname}&sz=32`}
-                        className="w-8 h-8 rounded"
+                        className="w-8 h-8 rounded flex-shrink-0"
                         alt=""
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                       />
                       <div className="flex-1 min-w-0">
-                        <a
-                          href={bookmark.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium hover:text-blue-600 truncate block"
-                          style={{ color: 'var(--text-primary)' }}
-                        >
+                        <div className="font-medium hover:text-blue-600 truncate block" style={{ color: 'var(--text-primary)' }}>
                           {bookmark.title}
-                        </a>
+                        </div>
                         <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{bookmark.url}</p>
                       </div>
-                      {bookmark.is_favorite && <span className="text-yellow-500">⭐</span>}
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <BookmarkMenu
+                          bookmarkId={bookmark.id}
+                          isFavorite={bookmark.is_favorite}
+                          isRead={bookmark.is_read}
+                          onToggleFavorite={() => toggleFavorite(bookmark)}
+                          onToggleReadingList={() => toggleRead(bookmark)}
+                          onEdit={() => router.push(`/bookmarks?edit=${bookmark.id}`)}
+                          onDelete={() => deleteBookmark(bookmark.id)}
+                        />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

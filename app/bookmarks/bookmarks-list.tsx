@@ -45,14 +45,15 @@ export function BookmarksList() {
   const [folderName, setFolderName] = useState('')
   const processedUrlParams = useRef(false)
 
-  // Handle URL parameters from extension popup
+  // Handle URL parameters from extension popup or edit requests
   useEffect(() => {
     const addUrl = searchParams.get('addUrl')
     const addTitle = searchParams.get('addTitle')
+    const editId = searchParams.get('edit')
 
+    // Handle adding new bookmark from extension
     if (addUrl && !processedUrlParams.current) {
       processedUrlParams.current = true
-      // Pre-fill form and open modal
       setFormData({
         url: decodeURIComponent(addUrl),
         title: addTitle ? decodeURIComponent(addTitle) : '',
@@ -62,11 +63,19 @@ export function BookmarksList() {
         tag_ids: [],
       })
       setModalOpen(true)
-
-      // Clear URL params
       window.history.replaceState({}, '', '/bookmarks')
     }
-  }, [searchParams])
+
+    // Handle editing existing bookmark
+    if (editId && bookmarks.length > 0 && !processedUrlParams.current) {
+      processedUrlParams.current = true
+      const bookmarkToEdit = bookmarks.find(b => b.id === editId)
+      if (bookmarkToEdit) {
+        openModal(bookmarkToEdit)
+        window.history.replaceState({}, '', '/bookmarks')
+      }
+    }
+  }, [searchParams, bookmarks])
 
   // Fetch all data in parallel on mount (with cache)
   useEffect(() => {
