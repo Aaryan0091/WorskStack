@@ -83,7 +83,8 @@ export function Sidebar() {
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               className="transition-all duration-75 active:scale-90"
               style={{
-                color: 'var(--text-primary)'
+                color: 'var(--text-primary)',
+                cursor: 'pointer'
               }}
               aria-label="Toggle theme"
             >

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, memo } from 'react'
+import { useState, useMemo, memo, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -93,6 +93,35 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
   const [modalOpen, setModalOpen] = useState(false)
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
   const [formData, setFormData] = useState({ url: '', title: '', description: '', notes: '' })
+
+  // Fetch data on mount if initial data is empty
+  useEffect(() => {
+    const fetchData = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const [bookmarksRes, bookmarkTagsRes] = await Promise.all([
+        supabase.from('bookmarks').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('bookmark_tags').select('bookmark_id, tags(*)'),
+      ])
+
+      if (bookmarksRes.data) setBookmarks(bookmarksRes.data)
+
+      const tagMap: Record<string, Tag[]> = {}
+      bookmarkTagsRes.data?.forEach((bt: any) => {
+        if (bt.tags) {
+          if (!tagMap[bt.bookmark_id]) tagMap[bt.bookmark_id] = []
+          tagMap[bt.bookmark_id].push(bt.tags)
+        }
+      })
+      // @ts-ignore
+      window.__bookmarkTags = tagMap
+    }
+
+    if (initialBookmarks.length === 0) {
+      fetchData()
+    }
+  }, [initialBookmarks])
 
   // Memoized filtering - instant search
   const filteredBookmarks = useMemo(() => {
