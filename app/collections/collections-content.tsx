@@ -29,6 +29,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
   const [collectionBookmarks, setCollectionBookmarks] = useState<Record<string, Bookmark[]>>({})
   const [loading, setLoading] = useState(true)
   const [availableBookmarks, setAvailableBookmarks] = useState<Bookmark[]>([])
+  const [isGuest, setIsGuest] = useState(false)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -49,7 +50,38 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
   useEffect(() => {
     const fetchData = async () => {
-      // Check cache first
+      // Check if user is logged in
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user) {
+        // Guest mode - load from sessionStorage
+        setIsGuest(true)
+        try {
+          const storedCollections = sessionStorage.getItem('workstack_guest_collections')
+          const storedBookmarks = sessionStorage.getItem('workstack_guest_bookmarks')
+          if (storedCollections) {
+            const parsedCollections = JSON.parse(storedCollections)
+            setCollections(parsedCollections)
+            // Build collectionBookmarks from guest bookmarks
+            if (storedBookmarks) {
+              const parsedBookmarks: Bookmark[] = JSON.parse(storedBookmarks)
+              const bookmarksMap: Record<string, Bookmark[]> = {}
+              parsedCollections.forEach((c: Collection) => {
+                bookmarksMap[c.id] = parsedBookmarks
+                  .filter((b: Bookmark) => b.collection_id === c.id)
+                  .slice(0, 3)
+              })
+              setCollectionBookmarks(bookmarksMap)
+            }
+          }
+        } catch (e) {
+          console.error('Error loading guest data:', e)
+        }
+        setLoading(false)
+        return
+      }
+
+      // Check cache first for logged-in users
       const now = Date.now()
       if (collectionsCache.data && now - collectionsCache.timestamp < collectionsCache.CACHE_TTL) {
         setCollections(collectionsCache.data.collections)
@@ -68,14 +100,16 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
         setCollections(collectionsData)
 
         // Then fetch only first 3 bookmarks per collection for preview (in parallel)
+        // Use junction table for many-to-many relationship
         const bookmarkPromises = collectionsData.map(async (collection: Collection) => {
           const { data } = await supabase
-            .from('bookmarks')
-            .select('*')
+            .from('collection_bookmarks')
+            .select('bookmark_id, bookmarks(*)')
             .eq('collection_id', collection.id)
-            .order('created_at', { ascending: false })
             .limit(3)
-          return { collectionId: collection.id, bookmarks: data || [] }
+
+          const bookmarks = data?.map((jb: any) => jb.bookmarks).filter(Boolean) || []
+          return { collectionId: collection.id, bookmarks }
         })
 
         const results = await Promise.all(bookmarkPromises)
@@ -99,6 +133,81 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
     fetchData()
   }, [])
 
+  // Real-time subscription for bookmark collection changes
+  useEffect(() => {
+    if (isGuest) return
+
+    const refreshCollections = async () => {
+      // Invalidate cache so we get fresh data
+      collectionsCache.data = null
+      collectionsCache.timestamp = 0
+
+      // Refresh collection data when bookmark collection changes
+      const { data: collectionsData } = await supabase
+        .from('collections')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (collectionsData) {
+        setCollections(collectionsData)
+
+        // Fetch sample bookmarks for each collection via junction table
+        const bookmarkPromises = collectionsData.map(async (collection: Collection) => {
+          const { data } = await supabase
+            .from('collection_bookmarks')
+            .select('bookmark_id, bookmarks(*)')
+            .eq('collection_id', collection.id)
+            .limit(3)
+
+          const bookmarks = data?.map((jb: any) => jb.bookmarks).filter(Boolean) || []
+          return { collectionId: collection.id, bookmarks }
+        })
+
+        const results = await Promise.all(bookmarkPromises)
+        const bookmarksMap: Record<string, Bookmark[]> = {}
+        results.forEach(({ collectionId, bookmarks }) => {
+          bookmarksMap[collectionId] = bookmarks
+        })
+
+        setCollectionBookmarks(bookmarksMap)
+      }
+    }
+
+    const channel = supabase
+      .channel('bookmarks-collection-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'bookmarks'
+        },
+        () => {
+          refreshCollections()
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to INSERT, UPDATE, DELETE on junction table
+          schema: 'public',
+          table: 'collection_bookmarks'
+        },
+        () => {
+          refreshCollections()
+        }
+      )
+      .subscribe()
+
+    // Polling as backup - refresh every 2 seconds for more responsive updates
+    const pollInterval = setInterval(refreshCollections, 2000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(pollInterval)
+    }
+  }, [isGuest])
+
   // Handle URL parameters from extension popup
   useEffect(() => {
     const addUrl = searchParams.get('addUrl')
@@ -119,6 +228,28 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
   const createCollection = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (isGuest) {
+      // Guest mode - save to sessionStorage
+      const newCollection: Collection = {
+        id: crypto.randomUUID(),
+        name: formData.name,
+        description: formData.description || null,
+        user_id: '',
+        is_public: formData.is_public,
+        share_slug: formData.name.toLowerCase().replace(/\s+/g, '-') + '-' + Math.random().toString(36).substr(2, 9),
+        created_at: new Date().toISOString()
+      }
+      const updatedCollections = [...collections, newCollection]
+      setCollections(updatedCollections)
+      try {
+        sessionStorage.setItem('workstack_guest_collections', JSON.stringify(updatedCollections))
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      setModalOpen(false)
+      setFormData({ name: '', description: '', is_public: false })
+      return
+    }
+
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
@@ -148,6 +279,19 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
   const deleteCollection = async (id: string) => {
     setActionLoading(true)
+
+    if (isGuest) {
+      const updatedCollections = collections.filter(c => c.id !== id)
+      setCollections(updatedCollections)
+      try {
+        sessionStorage.setItem('workstack_guest_collections', JSON.stringify(updatedCollections))
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      setDeleteModalOpen(false)
+      setCollectionToDelete(null)
+      setActionLoading(false)
+      return
+    }
+
     await supabase.from('collections').delete().eq('id', id)
 
     // Invalidate cache
@@ -166,6 +310,14 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
   }
 
   const togglePublic = async (collection: Collection) => {
+    if (isGuest) {
+      const updatedCollections = collections.map(c => c.id === collection.id ? { ...c, is_public: !c.is_public } : c)
+      setCollections(updatedCollections)
+      try {
+        sessionStorage.setItem('workstack_guest_collections', JSON.stringify(updatedCollections))
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      return
+    }
     await supabase.from('collections').update({ is_public: !collection.is_public }).eq('id', collection.id)
 
     // Invalidate cache
@@ -184,6 +336,19 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
   const updateCollection = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingCollection) return
+
+    if (isGuest) {
+      const updatedCollection = { ...editingCollection, name: formData.name, description: formData.description || null, is_public: formData.is_public }
+      const updatedCollections = collections.map(c => c.id === editingCollection.id ? updatedCollection : c)
+      setCollections(updatedCollections)
+      try {
+        sessionStorage.setItem('workstack_guest_collections', JSON.stringify(updatedCollections))
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      setEditModalOpen(false)
+      setEditingCollection(null)
+      setFormData({ name: '', description: '', is_public: false })
+      return
+    }
 
     const { data } = await supabase
       .from('collections')
@@ -209,6 +374,30 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
   }
 
   const addToCollection = async (bookmarkId: string, collectionId: string) => {
+    if (isGuest) {
+      // Update guest bookmarks in sessionStorage
+      try {
+        const storedBookmarks = sessionStorage.getItem('workstack_guest_bookmarks')
+        if (storedBookmarks) {
+          const allBookmarks: Bookmark[] = JSON.parse(storedBookmarks)
+          const updatedBookmarks = allBookmarks.map(b => b.id === bookmarkId ? { ...b, collection_id: collectionId } : b)
+          sessionStorage.setItem('workstack_guest_bookmarks', JSON.stringify(updatedBookmarks))
+          setAvailableBookmarks(updatedBookmarks)
+          // Update collection bookmarks cache
+          const bookmark = updatedBookmarks.find(b => b.id === bookmarkId)
+          if (bookmark) {
+            setCollectionBookmarks(prev => ({
+              ...prev,
+              [collectionId]: [bookmark, ...(prev[collectionId] || [])].slice(0, 3)
+            }))
+          }
+        }
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      setAddModalOpen(false)
+      setSelectedCollection(null)
+      return
+    }
+
     await supabase.from('bookmarks').update({ collection_id: collectionId }).eq('id', bookmarkId)
 
     // Invalidate cache
@@ -232,6 +421,51 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
   const addNewBookmarkToCollection = async (collection: Collection) => {
     if (!pendingBookmark) return
+
+    if (isGuest) {
+      // Guest mode - create bookmark in sessionStorage
+      try {
+        const storedBookmarks = sessionStorage.getItem('workstack_guest_bookmarks')
+        let allBookmarks: Bookmark[] = storedBookmarks ? JSON.parse(storedBookmarks) : []
+
+        // Check if bookmark already exists
+        const existingBookmark = allBookmarks.find(b => b.url === pendingBookmark.url)
+
+        if (existingBookmark) {
+          // Update existing bookmark to this collection
+          allBookmarks = allBookmarks.map(b => b.id === existingBookmark.id ? { ...b, collection_id: collection.id } : b)
+        } else {
+          // Create new bookmark in this collection
+          const newBookmark: Bookmark = {
+            id: crypto.randomUUID(),
+            user_id: '',
+            url: pendingBookmark.url,
+            title: pendingBookmark.title || new URL(pendingBookmark.url).hostname,
+            description: null,
+            notes: null,
+            is_read: true,
+            is_favorite: false,
+            collection_id: collection.id,
+            folder_id: null,
+            favicon_url: null,
+            screenshot_url: null,
+            last_opened_at: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+          allBookmarks = [newBookmark, ...allBookmarks]
+        }
+
+        sessionStorage.setItem('workstack_guest_bookmarks', JSON.stringify(allBookmarks))
+        // Refresh collection bookmarks
+        const collectionBookmarks = allBookmarks.filter(b => b.collection_id === collection.id).slice(0, 3)
+        setCollectionBookmarks(prev => ({ ...prev, [collection.id]: collectionBookmarks }))
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+
+      setSelectCollectionModalOpen(false)
+      setPendingBookmark(null)
+      return
+    }
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -294,9 +528,9 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
   return (
     <>
       {/* Search Bar - Full Width */}
-      <div className="relative">
+      <div className="relative mb-4">
         <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: 'var(--text-secondary)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <circle cx="11" cy="11" r="8" strokeWidth={2} />
+          <circle cx="11" cy="11" r={8} strokeWidth={2} />
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35" />
         </svg>
         <Input
@@ -306,6 +540,11 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
           className="pl-10"
           style={{ paddingRight: '12px' }}
         />
+        {isGuest && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'rgba(251, 146, 60, 0.2)', color: '#ea580c' }}>
+            Guest Mode
+          </span>
+        )}
       </div>
 
       {/* Loading Skeleton */}
@@ -444,11 +683,20 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
                         e.stopPropagation()
                         setSelectedCollection(collection)
                         // Fetch available bookmarks on-demand
-                        const { data } = await supabase
-                          .from('bookmarks')
-                          .select('*')
-                          .order('title', { ascending: true })
-                        if (data) setAvailableBookmarks(data)
+                        if (isGuest) {
+                          try {
+                            const storedBookmarks = sessionStorage.getItem('workstack_guest_bookmarks')
+                            if (storedBookmarks) {
+                              setAvailableBookmarks(JSON.parse(storedBookmarks))
+                            }
+                          } catch (e) { console.error('Error loading guest bookmarks:', e) }
+                        } else {
+                          const { data } = await supabase
+                            .from('bookmarks')
+                            .select('*')
+                            .order('title', { ascending: true })
+                          if (data) setAvailableBookmarks(data)
+                        }
                         setAddModalOpen(true)
                       }}
                     >

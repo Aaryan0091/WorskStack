@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo, memo, useTransition, startTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { isChromiumBased } from '@/lib/browser-detect'
+import { getExtensionId, isExtensionInstalledViaContentScript } from '@/lib/extension-detect'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -11,12 +11,12 @@ import { Modal } from '@/components/ui/modal'
 import { BookmarkMenu } from '@/components/bookmark-menu'
 import type { Bookmark, Collection } from '@/lib/types'
 
-// Simple Pie Chart component
+// Memoized Pie Chart component
 interface PieChartProps {
   data: { label: string; value: number; color: string }[]
 }
 
-function PieChart({ data }: PieChartProps) {
+const PieChart = memo(function PieChart({ data }: PieChartProps) {
   const total = data.reduce((sum, item) => sum + item.value, 0)
   const size = 160
   const strokeWidth = 22
@@ -34,7 +34,7 @@ function PieChart({ data }: PieChartProps) {
     }
   }
 
-  const slices = data.map((item) => {
+  const slices = useMemo(() => data.map((item) => {
     if (item.value === 0) return null
     const percentage = (item.value / total) * 100
     const angle = (item.value / total) * 360
@@ -72,7 +72,7 @@ function PieChart({ data }: PieChartProps) {
         style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
       />
     )
-  })
+  }), [data, total, radius, center, strokeWidth])
 
   return (
     <div className="flex items-center gap-5" style={{ height: containerHeight }}>
@@ -117,11 +117,11 @@ function PieChart({ data }: PieChartProps) {
       </div>
     </div>
   )
-}
+})
 
-// Simple Bar Chart component
-function BarChart({ data }: PieChartProps) {
-  const maxValue = Math.max(...data.map(d => d.value), 1)
+// Memoized Bar Chart component
+const BarChart = memo(function BarChart({ data }: PieChartProps) {
+  const maxValue = useMemo(() => Math.max(...data.map(d => d.value), 1), [data])
   const barWidth = 32
   const chartHeight = 120
   const gap = 12
@@ -181,14 +181,14 @@ function BarChart({ data }: PieChartProps) {
       </div>
     </div>
   )
-}
+})
 
-// Chart Container with toggle button
+// Memoized Chart Container with toggle button
 interface ChartWithToggleProps {
   data: { label: string; value: number; color: string }[]
 }
 
-function ChartWithToggle({ data }: ChartWithToggleProps) {
+const ChartWithToggle = memo(function ChartWithToggle({ data }: ChartWithToggleProps) {
   const [chartType, setChartType] = useState<'pie' | 'bar'>('pie')
 
   return (
@@ -222,9 +222,7 @@ function ChartWithToggle({ data }: ChartWithToggleProps) {
       </button>
     </div>
   )
-}
-
-const EXTENSION_ID = 'llahljdmcglglkcaadldnbpcpnkdinco'
+})
 
 export function DashboardContent({ initialBookmarks, initialCollections, initialStats }: { initialBookmarks: Bookmark[]; initialCollections: Collection[]; initialStats: { totalBookmarks: number; favoritesCount: number; unreadCount: number } }) {
   const router = useRouter()
@@ -232,6 +230,8 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   const [collections, setCollections] = useState<Collection[]>(initialCollections)
   // Combined counts state for atomic updates - initialized from server-side data
   const [counts, setCounts] = useState(initialStats)
+  const [isGuest, setIsGuest] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [isTracking, setIsTracking] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [hasSavedSession, setHasSavedSession] = useState(false)
@@ -255,15 +255,45 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     domain: string
     duration_seconds: number
   }>>([])
-  const [browserSupportsExtension, setBrowserSupportsExtension] = useState<boolean | null>(null)
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isPollingRef = useRef(false) // Track if polling is already active
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  // Check if browser is Chromium-based (supports Chrome extensions)
+  const isChromiumBrowser = () => {
+    if (typeof window === 'undefined') return false
+    const userAgent = navigator.userAgent
+    // Check for Chrome, Chromium, Brave, Edge (Chromium), Opera, Vivaldi, etc.
+    // Exclude old Edge (EdgeHTML) which has "Edge/" not "Edg/"
+    return /Chrome|Chromium|Brave|Edg|OPR|Vivaldi/.test(userAgent) && !/Edge\/|EdgeHTML|MSIE|Trident/.test(userAgent)
+  }
 
   // Fetch fresh data from server
   const fetchFreshData = async () => {
     // Get user token for API call
     const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) return
+    if (userError || !user) {
+      // Guest mode - load from sessionStorage
+      try {
+        const storedBookmarks = sessionStorage.getItem('workstack_guest_bookmarks')
+        const storedCollections = sessionStorage.getItem('workstack_guest_collections')
+        if (storedBookmarks) {
+          const parsedBookmarks = JSON.parse(storedBookmarks)
+          setBookmarks(parsedBookmarks.slice(0, 5))
+          setCounts({
+            totalBookmarks: parsedBookmarks.length,
+            favoritesCount: parsedBookmarks.filter((b: Bookmark) => b.is_favorite).length,
+            unreadCount: parsedBookmarks.filter((b: Bookmark) => !b.is_read).length,
+          })
+        }
+        if (storedCollections) {
+          setCollections(JSON.parse(storedCollections))
+        }
+      } catch (e) {
+        console.error('Error loading guest data:', e)
+      }
+      return
+    }
 
     const session = await supabase.auth.getSession()
     const token = session.data.session?.access_token
@@ -293,20 +323,112 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     if (collectionsRes.data) setCollections(collectionsRes.data)
   }
 
-  // Check extension on mount (after hydration)
+  // Check extension on mount (deferred to not block initial render)
   useEffect(() => {
-    // Detect browser support (client-side only to avoid hydration mismatch)
-    setBrowserSupportsExtension(isChromiumBased())
+    console.log('[Dashboard] useEffect - setting up extension polling')
 
-    checkExtensionInstalled()
-    // Store auth token in extension on page load
-    storeAuthTokenInExtension()
-    // Fetch fresh data on mount
-    fetchFreshData()
+    // Use a ref to store the handler for stable reference across HMR
+    const handlerRef = { current: null as ((event: any) => void) | null }
+
+    handlerRef.current = (event: any) => {
+      console.log('Extension loaded event:', event.detail)
+      if (event.detail?.installed) {
+        setExtensionInstalled(true)
+        if (event.detail?.extensionId) {
+          console.log('[Dashboard] Extension loaded, starting poll')
+          // Clear any existing interval before starting a new one
+          if (checkIntervalRef.current) {
+            console.log('[Dashboard] Clearing existing interval')
+            clearInterval(checkIntervalRef.current)
+          }
+          checkExtensionStatus()
+          checkIntervalRef.current = setInterval(checkExtensionStatus, 100)
+          console.log('[Dashboard] Polling interval started (100ms)')
+        }
+      }
+    }
+
+    const handleExtensionLoaded = handlerRef.current
+    window.addEventListener('workstack-extension-loaded', handleExtensionLoaded)
+
+    // Defer extension detection to not block initial render
+    const initTimer = setTimeout(async () => {
+      console.log('[Dashboard] initTimer fired')
+      // Also check immediately (in case content script already ran)
+      if (isExtensionInstalledViaContentScript()) {
+        console.log('Extension check: detected via content script (immediate check)')
+        setExtensionInstalled(true)
+        const extensionId = getExtensionId()
+        if (extensionId) {
+          // Delay status check slightly
+          setTimeout(() => {
+            console.log('[Dashboard] Starting poll from content script detection')
+            // Clear any existing interval before starting a new one
+            if (checkIntervalRef.current) {
+              clearInterval(checkIntervalRef.current)
+            }
+            checkExtensionStatus()
+            checkIntervalRef.current = setInterval(checkExtensionStatus, 100)
+            console.log('[Dashboard] Polling interval started (100ms)')
+          }, 100)
+        }
+      }
+
+      // Check if user is logged in
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user) {
+        setIsGuest(true)
+      }
+
+      // Hide loading state immediately - data will load in background
+      setLoading(false)
+
+      // Check extension status regardless of login state
+      checkExtensionInstalled()
+
+      // Only store token and set up subscription if logged in
+      if (user) {
+        // Store auth token in extension on page load
+        storeAuthTokenInExtension()
+
+        // Set up realtime subscription for instant updates
+        const channel = supabase
+          .channel('bookmarks-changes')
+          .on(
+            'postgres_changes',
+            {
+              event: '*', // Listen to all changes (INSERT, UPDATE, DELETE)
+              schema: 'public',
+              table: 'bookmarks',
+              filter: `user_id=eq.${user.id}`
+            },
+            () => {
+              console.log('Bookmarks changed, refreshing...')
+              fetchFreshData()
+            }
+          )
+          .subscribe()
+
+        channelRef.current = channel
+      }
+
+      // Fetch fresh data in background (non-blocking)
+      fetchFreshData()
+    }, 50) // Small delay to avoid hydration issues
 
     // Listen for auth state changes and sync token to extension
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: any) => {
       console.log('Auth state changed:', event, session?.access_token ? 'token present' : 'no token')
+      if (event === 'SIGNED_IN') {
+        setIsGuest(false)
+        fetchFreshData()
+      } else if (event === 'SIGNED_OUT') {
+        setIsGuest(true)
+        setBookmarks([])
+        setCollections([])
+        setCounts({ totalBookmarks: 0, favoritesCount: 0, unreadCount: 0 })
+      }
       if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         // Use the session from the event directly
         if (session?.access_token) {
@@ -315,36 +437,17 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       }
     })
 
-    // Set up realtime subscription for instant updates
-    const setupRealtime = async () => {
-      const { data, error } = await supabase.auth.getUser()
-      if (error || !data?.user) return
-
-      const user = data.user
-      const channel = supabase
-        .channel('bookmarks-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*', // Listen to all changes (INSERT, UPDATE, DELETE)
-            schema: 'public',
-            table: 'bookmarks',
-            filter: `user_id=eq.${user.id}`
-          },
-          () => {
-            console.log('Bookmarks changed, refreshing...')
-            fetchFreshData()
-          }
-        )
-        .subscribe()
-
-      channelRef.current = channel
-    }
-
-    setupRealtime()
-
     return () => {
-      if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
+      console.log('[Dashboard] useEffect cleanup - clearing interval')
+      clearTimeout(initTimer)
+      if (handlerRef.current) {
+        window.removeEventListener('workstack-extension-loaded', handlerRef.current)
+      }
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current)
+        checkIntervalRef.current = null
+        console.log('[Dashboard] Interval cleared')
+      }
       subscription.unsubscribe()
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
@@ -357,6 +460,9 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     const chrome = (window as any).chrome
     if (!chrome?.runtime) return
 
+    const extensionId = getExtensionId()
+    if (!extensionId) return
+
     let responded = false
     const timeout = setTimeout(() => {
       if (!responded) {
@@ -365,7 +471,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       }
     }, 500)
 
-    chrome.runtime.sendMessage(EXTENSION_ID, {
+    chrome.runtime.sendMessage(extensionId, {
       action: 'storeAuthToken',
       authToken: token,
       apiBaseUrl: window.location.origin
@@ -390,33 +496,68 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   }
 
   const checkExtensionInstalled = () => {
-    if (typeof window === 'undefined' || !(window as any).chrome?.runtime) {
+    if (typeof window === 'undefined') {
+      setExtensionInstalled(false)
+      return
+    }
+
+    // First check: Content script marker (most reliable - set by content.js)
+    if (isExtensionInstalledViaContentScript()) {
+      console.log('Extension check: detected via content script')
+      setExtensionInstalled(true)
+      const extensionId = getExtensionId()
+      if (extensionId) {
+        // Clear any existing interval before starting a new one
+        if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
+        checkExtensionStatus()
+        checkIntervalRef.current = setInterval(checkExtensionStatus, 100)
+      }
+      return
+    }
+
+    // Second check: Try messaging via chrome.runtime API
+    if (!(window as any).chrome?.runtime) {
       setExtensionInstalled(false)
       return
     }
 
     const chrome = (window as any).chrome
-    let responded = false
 
-    // Set a timeout to fail fast if extension doesn't respond
+    // Try to get extension ID - this now uses known IDs as fallback
+    const extensionId = getExtensionId()
+
+    // If we don't have an extension ID at this point, we can't send a message
+    if (!extensionId) {
+      console.log('Extension check: no extension ID available')
+      setExtensionInstalled(false)
+      return
+    }
+
+    // Verify the extension actually responds
+    let responded = false
     const timeout = setTimeout(() => {
       if (!responded) {
         responded = true
+        console.log('Extension check: timeout - extension not responding')
         setExtensionInstalled(false)
       }
-    }, 500) // Fail fast after 500ms
+    }, 1000)
 
-    chrome.runtime.sendMessage(EXTENSION_ID, { action: 'ping' }, (response: any) => {
-      if (responded) return // Already timed out
+    chrome.runtime.sendMessage(extensionId, { action: 'ping' }, (response: any) => {
+      if (responded) return
       responded = true
       clearTimeout(timeout)
 
       if (chrome.runtime.lastError) {
+        console.log('Extension check: error -', chrome.runtime.lastError.message)
         setExtensionInstalled(false)
       } else if (response?.success) {
+        console.log('Extension check: success - extension is installed')
         setExtensionInstalled(true)
+        // Clear any existing interval before starting a new one
+        if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
         checkExtensionStatus()
-        checkIntervalRef.current = setInterval(checkExtensionStatus, 2000)
+        checkIntervalRef.current = setInterval(checkExtensionStatus, 100)
       } else {
         setExtensionInstalled(false)
       }
@@ -427,19 +568,29 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     const chrome = (window as any).chrome
     if (!chrome?.runtime) return
 
-    chrome.runtime.sendMessage(EXTENSION_ID, { action: 'getStatus' }, (response: any) => {
+    const extensionId = getExtensionId()
+    if (!extensionId) return
+
+    chrome.runtime.sendMessage(extensionId, { action: 'getStatus' }, (response: any) => {
       if (response && !chrome.runtime.lastError) {
         setIsTracking(response.isTracking)
         setIsPaused(response.isPaused || false)
         setHasSavedSession(response.hasSavedSession || false)
         if (response.sessionTabs) {
+          console.log('[Dashboard] Received tabs:', response.sessionTabs.length, response.sessionTabs.map(t => t.url))
           setSessionTabs(response.sessionTabs)
         }
+      } else {
+        console.log('[Dashboard] getStatus failed or no response')
       }
     })
   }
 
   const startTracking = async () => {
+    if (isGuest) {
+      router.push('/login')
+      return
+    }
     if (extensionInstalled === false) {
       setShowExtensionModal(true)
       return
@@ -459,12 +610,18 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     const apiBaseUrl = window.location.origin
     const chrome = (window as any).chrome
 
+    const extensionId = getExtensionId()
+    if (!extensionId) {
+      setShowExtensionModal(true)
+      return
+    }
+
     // First store the auth token, then start tracking
     if (session?.session?.access_token) {
       storeAuthTokenToExtension(session.session.access_token)
     }
 
-    chrome.runtime.sendMessage(EXTENSION_ID, {
+    chrome.runtime.sendMessage(extensionId, {
       action: 'startTracking',
       userId: user.id,
       authToken: session?.access_token,
@@ -481,7 +638,10 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     const chrome = (window as any).chrome
     if (!chrome?.runtime) return
 
-    chrome.runtime.sendMessage(EXTENSION_ID, { action: 'stopTracking' }, (response: any) => {
+    const extensionId = getExtensionId()
+    if (!extensionId) return
+
+    chrome.runtime.sendMessage(extensionId, { action: 'stopTracking' }, (response: any) => {
       if (response?.success) {
         setIsTracking(false)
         setIsPaused(false)
@@ -495,7 +655,10 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     const chrome = (window as any).chrome
     if (!chrome?.runtime) return
 
-    chrome.runtime.sendMessage(EXTENSION_ID, { action: 'openSavedTabs' }, (response: any) => {
+    const extensionId = getExtensionId()
+    if (!extensionId) return
+
+    chrome.runtime.sendMessage(extensionId, { action: 'openSavedTabs' }, (response: any) => {
       if (response?.success) {
         // Tabs opened but tracking not started
         console.log('Saved tabs opened')
@@ -533,7 +696,10 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     const chrome = (window as any).chrome
     if (!chrome?.runtime) return
 
-    chrome.runtime.sendMessage(EXTENSION_ID, { action: 'pauseTracking' }, (response: any) => {
+    const extensionId = getExtensionId()
+    if (!extensionId) return
+
+    chrome.runtime.sendMessage(extensionId, { action: 'pauseTracking' }, (response: any) => {
       if (response?.success) {
         setIsPaused(true)
       }
@@ -544,7 +710,10 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     const chrome = (window as any).chrome
     if (!chrome?.runtime) return
 
-    chrome.runtime.sendMessage(EXTENSION_ID, { action: 'resumeTracking' }, (response: any) => {
+    const extensionId = getExtensionId()
+    if (!extensionId) return
+
+    chrome.runtime.sendMessage(extensionId, { action: 'resumeTracking' }, (response: any) => {
       if (response?.success) {
         setIsPaused(false)
       }
@@ -553,29 +722,73 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
 
   // Bookmark action functions
   const toggleFavorite = async (bookmark: Bookmark) => {
+    if (isGuest) {
+      const updated = bookmarks.map(b => b.id === bookmark.id ? { ...b, is_favorite: !b.is_favorite } : b)
+      setBookmarks(updated)
+      // Save to sessionStorage
+      try {
+        const stored = sessionStorage.getItem('workstack_guest_bookmarks')
+        if (stored) {
+          const allBookmarks = JSON.parse(stored)
+          const updatedAll = allBookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, is_favorite: !b.is_favorite } : b)
+          sessionStorage.setItem('workstack_guest_bookmarks', JSON.stringify(updatedAll))
+        }
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      fetchFreshData()
+      return
+    }
     await supabase.from('bookmarks').update({ is_favorite: !bookmark.is_favorite }).eq('id', bookmark.id)
     setBookmarks(bookmarks.map(b => b.id === bookmark.id ? { ...b, is_favorite: !b.is_favorite } : b))
     fetchFreshData()
   }
 
   const toggleRead = async (bookmark: Bookmark) => {
+    if (isGuest) {
+      const updated = bookmarks.map(b => b.id === bookmark.id ? { ...b, is_read: !b.is_read } : b)
+      setBookmarks(updated)
+      // Save to sessionStorage
+      try {
+        const stored = sessionStorage.getItem('workstack_guest_bookmarks')
+        if (stored) {
+          const allBookmarks = JSON.parse(stored)
+          const updatedAll = allBookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, is_read: !b.is_read } : b)
+          sessionStorage.setItem('workstack_guest_bookmarks', JSON.stringify(updatedAll))
+        }
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      fetchFreshData()
+      return
+    }
     await supabase.from('bookmarks').update({ is_read: !bookmark.is_read }).eq('id', bookmark.id)
     setBookmarks(bookmarks.map(b => b.id === bookmark.id ? { ...b, is_read: !b.is_read } : b))
     fetchFreshData()
   }
 
   const deleteBookmark = async (id: string) => {
+    if (isGuest) {
+      setBookmarks(bookmarks.filter(b => b.id !== id))
+      // Save to sessionStorage
+      try {
+        const stored = sessionStorage.getItem('workstack_guest_bookmarks')
+        if (stored) {
+          const allBookmarks = JSON.parse(stored)
+          const updatedAll = allBookmarks.filter((b: Bookmark) => b.id !== id)
+          sessionStorage.setItem('workstack_guest_bookmarks', JSON.stringify(updatedAll))
+        }
+      } catch (e) { console.error('Error saving to sessionStorage:', e) }
+      fetchFreshData()
+      return
+    }
     await supabase.from('bookmarks').delete().eq('id', id)
     setBookmarks(bookmarks.filter(b => b.id !== id))
     fetchFreshData()
   }
 
-  const stats = {
+  const stats = useMemo(() => ({
     total: counts.totalBookmarks,
     unread: counts.unreadCount,
     favorites: counts.favoritesCount,
     collections: collections.length,
-  }
+  }), [counts.totalBookmarks, counts.unreadCount, counts.favoritesCount, collections.length])
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -593,6 +806,21 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     }
   }
 
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="space-y-8 pt-20">
+          <div className="h-12 bg-gray-200 rounded w-64 animate-pulse mb-2" />
+          <div className="h-6 bg-gray-200 rounded w-48 animate-pulse mb-8" />
+          <div className="flex gap-3">
+            <div className="h-10 bg-gray-200 rounded-lg w-40 animate-pulse" />
+            <div className="h-10 bg-gray-200 rounded-lg w-48 animate-pulse" />
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-8">
@@ -603,6 +831,11 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
             </h1>
             <p className="mt-2 text-xl" style={{ color: 'var(--text-secondary)' }}>
               Your personal bookmark manager
+              {isGuest && (
+                <span className="ml-3 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: 'rgba(251, 146, 60, 0.2)', color: '#ea580c' }}>
+                  Guest Mode - <a href="/login" className="underline hover:no-underline">Sign in</a> to save your data
+                </span>
+              )}
             </p>
           </div>
           <div className="mt-6">
@@ -647,6 +880,37 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                     </button>
                   </>
                 )}
+                {/* Extension status when not tracking */}
+                {extensionInstalled === true ? (
+                  <span className="text-sm font-semibold flex items-center gap-1" style={{ color: '#22c55e' }}>
+                    Extension ready
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ strokeWidth: 2.5 }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  </span>
+                ) : isChromiumBrowser() ? (
+                  <button
+                    onClick={() => router.push('/extension')}
+                    className="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-75 active:scale-90 hover:scale-105 flex items-center gap-2"
+                    style={{
+                      background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                      color: 'white',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download Extension
+                  </button>
+                ) : (
+                  <span className="text-sm font-medium flex items-center gap-2" style={{ color: '#f59e0b' }}>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    Extension not supported
+                  </span>
+                )}
               </>
             ) : (
               <>
@@ -673,23 +937,6 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                 </button>
               </>
             )}
-
-            {/* Extension status */}
-            {browserSupportsExtension === false ? (
-              <span className="text-sm px-3 py-2 rounded-lg" style={{ backgroundColor: 'var(--bg-secondary)', color: '#f59e0b' }}>
-                ⚠️ Extension requires Chrome/Edge/Brave
-              </span>
-            ) : browserSupportsExtension === true && extensionInstalled === false ? (
-              <button
-                onClick={() => router.push('/extension')}
-                className="px-4 py-2 rounded-lg font-medium transition-all duration-75 active:scale-90 flex items-center gap-2"
-                style={{ backgroundColor: '#8b5cf6', color: 'white', cursor: 'pointer' }}
-              >
-                <span>📥 Download Extension</span>
-              </button>
-            ) : extensionInstalled === true && !isTracking ? (
-              <span className="text-sm" style={{ color: '#22c55e' }}>✓ Extension ready</span>
-            ) : null}
 
             {isTracking && !isPaused && (
               <span className="text-sm" style={{ color: '#22c55e' }}>● Recording</span>
@@ -721,9 +968,9 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                 </span>
               </div>
               <div className="overflow-y-auto" style={{ maxHeight: '340px' }}>
-                {sessionTabs.map((tab, index) => (
+                {sessionTabs.map((tab) => (
                   <div
-                    key={index}
+                    key={tab.url}
                     className="p-3 border-b hover:bg-gray-50 transition-colors duration-150"
                     style={{ borderColor: 'var(--border-color)' }}
                   >
@@ -1023,51 +1270,88 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
               scrollbarWidth: 'thin',
               scrollbarColor: 'rgba(139, 92, 246, 0.3) transparent'
             }}>
-              {/* Group by date */}
+              {/* Group by domain and aggregate */}
               {(() => {
-                const groupedByDate: Record<string, typeof previousActivityData> = {}
+                const groupedByDomain = new Map<string, {
+                  domain: string
+                  url: string
+                  title: string
+                  totalSeconds: number
+                  visitCount: number
+                  lastVisited: string
+                }>()
+
                 previousActivityData.forEach(item => {
-                  const date = new Date(item.started_at).toLocaleDateString()
-                  if (!groupedByDate[date]) groupedByDate[date] = []
-                  groupedByDate[date].push(item)
+                  const domain = item.domain
+
+                  if (!groupedByDomain.has(domain)) {
+                    groupedByDomain.set(domain, {
+                      domain,
+                      url: item.url,
+                      title: item.title || item.url,
+                      totalSeconds: item.duration_seconds,
+                      visitCount: 1,
+                      lastVisited: item.started_at
+                    })
+                  } else {
+                    const existing = groupedByDomain.get(domain)!
+                    existing.totalSeconds += item.duration_seconds
+                    existing.visitCount += 1
+                    if (item.started_at > existing.lastVisited) {
+                      existing.lastVisited = item.started_at
+                      existing.url = item.url
+                      existing.title = item.title || item.url
+                    }
+                  }
                 })
-                return Object.entries(groupedByDate).map(([date, items]) => (
-                  <div key={date} className="mb-4">
-                    <h3 className="text-sm font-semibold mb-2 px-2 py-1 rounded" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
-                      {date}
-                    </h3>
-                    <div className="space-y-2">
-                      {items.map((item) => (
-                        <a
-                          key={item.id}
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block p-3 rounded-lg border transition-all duration-75 hover:scale-[1.01] active:scale-100 hover:shadow-md"
-                          style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', cursor: 'pointer' }}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                                {item.title || item.url}
-                              </p>
-                              <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
-                                {item.domain}
-                              </p>
-                            </div>
-                            <div className="text-right ml-3 flex-shrink-0">
-                              <p className="text-sm font-medium" style={{ color: '#8b5cf6' }}>
-                                {Math.floor(item.duration_seconds / 60)}m
-                              </p>
-                              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                {new Date(item.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                            </div>
+
+                // Sort by total time spent
+                const sorted = Array.from(groupedByDomain.values()).sort((a, b) => b.totalSeconds - a.totalSeconds)
+
+                return sorted.map((item) => (
+                  <a
+                    key={item.domain}
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block p-3 rounded-lg border transition-all duration-75 hover:scale-[1.01] active:scale-100 hover:shadow-md mb-2"
+                    style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)', cursor: 'pointer' }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <img
+                          src={`https://www.google.com/s2/favicons?domain=${item.domain}&sz=32`}
+                          className="w-6 h-6 rounded flex-shrink-0"
+                          alt=""
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                              {item.title}
+                            </p>
+                            {item.visitCount > 1 && (
+                              <span className="text-xs px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6' }}>
+                                {item.visitCount} visits
+                              </span>
+                            )}
                           </div>
-                        </a>
-                      ))}
+                          <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
+                            {item.domain}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right ml-3 flex-shrink-0">
+                        <p className="text-sm font-medium" style={{ color: '#8b5cf6' }}>
+                          {item.totalSeconds >= 3600
+                            ? `${Math.floor(item.totalSeconds / 3600)}h ${Math.floor((item.totalSeconds % 3600) / 60)}m`
+                            : `${Math.floor(item.totalSeconds / 60)}m`}
+                        </p>
+                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          total time
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  </a>
                 ))
               })()}
             </div>

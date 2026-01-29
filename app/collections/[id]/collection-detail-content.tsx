@@ -14,10 +14,6 @@ interface Props {
   collectionId: string
 }
 
-// Simple in-memory cache for faster loads
-const collectionCache = new Map<string, { collection: Collection; bookmarks: Bookmark[]; timestamp: number }>()
-const CACHE_TTL = 30000 // 30 seconds
-
 type AddModalTab = 'existing' | 'new'
 
 export function CollectionDetailContent({ collectionId }: Props) {
@@ -36,9 +32,16 @@ export function CollectionDetailContent({ collectionId }: Props) {
   const [availableBookmarks, setAvailableBookmarks] = useState<Bookmark[]>([])
   const [availableBookmarksLoading, setAvailableBookmarksLoading] = useState(false)
   const [bookmarkSearchQuery, setBookmarkSearchQuery] = useState('')
+  const [selectedBookmarkIds, setSelectedBookmarkIds] = useState<Set<string>>(new Set())
+  const [selectionMode, setSelectionMode] = useState(false)
 
   useEffect(() => {
     fetchData()
+
+    // Poll every 2 seconds to keep data in sync with changes from other pages
+    const pollInterval = setInterval(fetchData, 2000)
+
+    return () => clearInterval(pollInterval)
   }, [collectionId])
 
   // Fetch available bookmarks when modal opens
@@ -65,6 +68,14 @@ export function CollectionDetailContent({ collectionId }: Props) {
       return
     }
 
+    // Fetch bookmarks that are already in this collection via junction table
+    const { data: existingInCollection } = await supabase
+      .from('collection_bookmarks')
+      .select('bookmark_id')
+      .eq('collection_id', collectionId)
+
+    const existingIds = new Set(existingInCollection?.map((c: any) => c.bookmark_id) || [])
+
     // Fetch all user's bookmarks, then filter out the ones already in this collection
     const { data } = await supabase
       .from('bookmarks')
@@ -73,68 +84,48 @@ export function CollectionDetailContent({ collectionId }: Props) {
       .order('title', { ascending: true })
 
     // Filter out bookmarks already in this collection
-    const available = (data || []).filter((b: Bookmark) => b.collection_id !== collectionId)
+    const available = (data || []).filter((b: Bookmark) => !existingIds.has(b.id))
     setAvailableBookmarks(available)
     setAvailableBookmarksLoading(false)
   }
 
   const addExistingToCollection = async (bookmark: Bookmark) => {
-    setActionLoading(true)
-
-    // Add bookmark to this collection
-    const { data } = await supabase
-      .from('bookmarks')
-      .update({ collection_id: collectionId })
-      .eq('id', bookmark.id)
-      .select()
-      .single()
-
-    if (data) {
-      setBookmarks([data, ...bookmarks])
-      // Update cache
-      const cached = collectionCache.get(collectionId)
-      if (cached) {
-        collectionCache.set(collectionId, {
-          ...cached,
-          bookmarks: [data, ...cached.bookmarks],
-          timestamp: Date.now()
-        })
-      }
-    }
-
-    setActionLoading(false)
+    // Optimistically update UI immediately
+    setBookmarks([bookmark, ...bookmarks])
     setAddModalOpen(false)
+    setActionLoading(false)
+
+    // Do database operation in background
+    supabase
+      .from('collection_bookmarks')
+      .insert({
+        collection_id: collectionId,
+        bookmark_id: bookmark.id
+      })
   }
 
   const fetchData = async () => {
-    // Check cache first
-    const cached = collectionCache.get(collectionId)
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      setCollection(cached.collection)
-      setBookmarks(cached.bookmarks)
-      setLoading(false)
-      return
-    }
-
     setLoading(true)
 
-    // Fetch collection and bookmarks in parallel with minimal fields
-    const [collectionRes, bookmarksRes] = await Promise.all([
+    // Fetch collection and bookmarks in parallel
+    // Use junction table collection_bookmarks for many-to-many relationship
+    const [collectionRes, junctionRes] = await Promise.all([
       supabase.from('collections').select('*').eq('id', collectionId).single(),
-      supabase.from('bookmarks').select('*').eq('collection_id', collectionId).order('created_at', { ascending: false }),
+      supabase
+        .from('collection_bookmarks')
+        .select('bookmark_id, bookmarks(*)')
+        .eq('collection_id', collectionId),
     ])
 
     const newCollection = collectionRes.data
-    const newBookmarks = bookmarksRes.data || []
+
+    // Extract bookmarks from junction table result
+    const newBookmarks = junctionRes.data
+      ?.map((jb: any) => jb.bookmarks)
+      .filter(Boolean) || []
 
     if (newCollection) {
       setCollection(newCollection)
-      // Cache the results
-      collectionCache.set(collectionId, {
-        collection: newCollection,
-        bookmarks: newBookmarks,
-        timestamp: Date.now()
-      })
     }
     setBookmarks(newBookmarks)
     setLoading(false)
@@ -164,49 +155,85 @@ export function CollectionDetailContent({ collectionId }: Props) {
       return
     }
 
-    // Check if bookmark already exists globally (across all collections)
+    // Check if bookmark already exists globally
     const { data: existingBookmark } = await supabase
       .from('bookmarks')
-      .select('id, collection_id, title')
+      .select('*')
       .eq('user_id', user.id)
       .eq('url', formData.url)
       .single()
 
+    let newBookmark
+
     if (existingBookmark) {
-      setActionLoading(false)
-      if (existingBookmark.collection_id === collectionId) {
+      // Check if already in this collection
+      const { data: existingRelation } = await supabase
+        .from('collection_bookmarks')
+        .select('*')
+        .eq('collection_id', collectionId)
+        .eq('bookmark_id', existingBookmark.id)
+        .single()
+
+      if (existingRelation) {
+        setActionLoading(false)
         setFormError('This bookmark is already in this collection')
-      } else {
-        setFormError('This URL is already bookmarked')
+        return
       }
-      return
+
+      // Add to collection via junction table
+      const { error } = await supabase
+        .from('collection_bookmarks')
+        .insert({
+          collection_id: collectionId,
+          bookmark_id: existingBookmark.id
+        })
+
+      if (error) {
+        setActionLoading(false)
+        setFormError('Failed to add to collection')
+        return
+      }
+
+      newBookmark = existingBookmark
+    } else {
+      // Create new bookmark
+      const { data } = await supabase
+        .from('bookmarks')
+        .insert({
+          user_id: user.id,
+          url: formData.url,
+          title: formData.title || new URL(formData.url).hostname,
+          is_read: false,
+          is_favorite: false,
+        })
+        .select()
+        .single()
+
+      if (!data) {
+        setActionLoading(false)
+        setFormError('Failed to create bookmark')
+        return
+      }
+
+      // Add to collection via junction table
+      const { error } = await supabase
+        .from('collection_bookmarks')
+        .insert({
+          collection_id: collectionId,
+          bookmark_id: data.id
+        })
+
+      if (error) {
+        setActionLoading(false)
+        setFormError('Failed to add to collection')
+        return
+      }
+
+      newBookmark = data
     }
 
-    // Create new bookmark in this collection
-    const { data: bookmark } = await supabase
-      .from('bookmarks')
-      .insert({
-        user_id: user.id,
-        url: formData.url,
-        title: formData.title || new URL(formData.url).hostname,
-        collection_id: collectionId,
-        is_read: false,
-        is_favorite: false,
-      })
-      .select()
-      .single()
-
-    if (bookmark) {
-      setBookmarks([bookmark, ...bookmarks])
-      // Update cache
-      const cached = collectionCache.get(collectionId)
-      if (cached) {
-        collectionCache.set(collectionId, {
-          ...cached,
-          bookmarks: [bookmark, ...cached.bookmarks],
-          timestamp: Date.now()
-        })
-      }
+    if (newBookmark) {
+      setBookmarks([newBookmark, ...bookmarks])
     }
 
     setFormData({ url: '', title: '' })
@@ -216,22 +243,20 @@ export function CollectionDetailContent({ collectionId }: Props) {
 
   const removeFromCollection = async (bookmarkId: string) => {
     setActionLoading(true)
-    await supabase.from('bookmarks').update({ collection_id: null }).eq('id', bookmarkId)
 
+    // Optimistically update UI immediately
     const updatedBookmarks = bookmarks.filter(b => b.id !== bookmarkId)
     setBookmarks(updatedBookmarks)
-
-    // Update cache
-    const cached = collectionCache.get(collectionId)
-    if (cached) {
-      collectionCache.set(collectionId, {
-        ...cached,
-        bookmarks: updatedBookmarks,
-        timestamp: Date.now()
-      })
-    }
-
     setActionLoading(false)
+
+    // Do database operation in background
+    ;(async () => {
+      await supabase
+        .from('collection_bookmarks')
+        .delete()
+        .eq('collection_id', collectionId)
+        .eq('bookmark_id', bookmarkId)
+    })()
   }
 
   const toggleFavorite = async (bookmarkId: string, currentStatus: boolean) => {
@@ -242,16 +267,6 @@ export function CollectionDetailContent({ collectionId }: Props) {
       b.id === bookmarkId ? { ...b, is_favorite: newStatus } : b
     )
     setBookmarks(updatedBookmarks)
-
-    // Update cache immediately
-    const cached = collectionCache.get(collectionId)
-    if (cached) {
-      collectionCache.set(collectionId, {
-        ...cached,
-        bookmarks: updatedBookmarks,
-        timestamp: Date.now()
-      })
-    }
 
     // Update in background
     await supabase
@@ -269,7 +284,6 @@ export function CollectionDetailContent({ collectionId }: Props) {
 
     setActionLoading(true)
     await supabase.from('collections').delete().eq('id', collection.id)
-    collectionCache.delete(collectionId)
     setDeleteModalOpen(false)
     setActionLoading(false)
     router.push('/collections')
@@ -288,15 +302,6 @@ export function CollectionDetailContent({ collectionId }: Props) {
 
     if (data) {
       setCollection(data)
-      // Update cache
-      const cached = collectionCache.get(collectionId)
-      if (cached) {
-        collectionCache.set(collectionId, {
-          ...cached,
-          collection: data,
-          timestamp: Date.now()
-        })
-      }
     }
   }
 
@@ -327,15 +332,6 @@ export function CollectionDetailContent({ collectionId }: Props) {
 
     if (data) {
       setCollection(data)
-      // Update cache
-      const cached = collectionCache.get(collectionId)
-      if (cached) {
-        collectionCache.set(collectionId, {
-          ...cached,
-          collection: data,
-          timestamp: Date.now()
-        })
-      }
       setEditModalOpen(false)
     }
   }
@@ -346,6 +342,89 @@ export function CollectionDetailContent({ collectionId }: Props) {
     } catch {
       return url
     }
+  }
+
+  const toggleBookmarkSelection = (bookmarkId: string) => {
+    const newSelection = new Set(selectedBookmarkIds)
+    if (newSelection.has(bookmarkId)) {
+      newSelection.delete(bookmarkId)
+    } else {
+      newSelection.add(bookmarkId)
+    }
+    setSelectedBookmarkIds(newSelection)
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedBookmarkIds.size === bookmarks.length) {
+      // Deselect all
+      setSelectedBookmarkIds(new Set())
+    } else {
+      // Select all
+      setSelectedBookmarkIds(new Set(bookmarks.map(b => b.id)))
+    }
+  }
+
+  const selectAll = () => {
+    setSelectedBookmarkIds(new Set(bookmarks.map(b => b.id)))
+  }
+
+  const deselectAll = () => {
+    setSelectedBookmarkIds(new Set())
+  }
+
+  const openSelectedTabs = async () => {
+    const selectedBookmarks = bookmarks.filter(b => selectedBookmarkIds.has(b.id))
+    const urls = selectedBookmarks.map(b => b.url)
+
+    // Try using the extension first (bypasses popup blockers)
+    if (typeof window !== 'undefined' && (window as any).chrome?.runtime) {
+      try {
+        // Dynamic import to avoid SSR issues
+        const { getExtensionId } = await import('@/lib/extension-detect')
+        const extensionId = getExtensionId()
+
+        if (extensionId) {
+          ;(window as any).chrome.runtime.sendMessage(extensionId, { action: 'openUrls', urls }, (response: any) => {
+            if ((window as any).chrome.runtime.lastError) {
+              // Extension not available, fall back to anchor method
+              console.log('Extension not responding, using fallback method')
+              openTabsFallback(urls)
+            } else {
+              console.log('Opened tabs via extension')
+            }
+          })
+          // Clear selection after opening
+          setSelectedBookmarkIds(new Set())
+          setSelectionMode(false)
+          return
+        }
+      } catch (e) {
+        console.log('Extension detection failed, using fallback')
+      }
+    }
+
+    // Fallback: Create anchor elements and click them
+    openTabsFallback(urls)
+    // Clear selection after opening
+    setSelectedBookmarkIds(new Set())
+    setSelectionMode(false)
+  }
+
+  const openTabsFallback = (urls: string[]) => {
+    urls.forEach((url) => {
+      const link = document.createElement('a')
+      link.href = url
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    })
+  }
+
+  const exitSelectionMode = () => {
+    setSelectedBookmarkIds(new Set())
+    setSelectionMode(false)
   }
 
   if (loading) {
@@ -366,26 +445,40 @@ export function CollectionDetailContent({ collectionId }: Props) {
       <div>
         {/* Back button row */}
         <div className="flex items-center justify-between gap-4 mb-4">
-          <Button variant="secondary" onClick={() => router.push('/collections')}>
-            ← Back
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => router.push('/collections')}>
+              ← Back
+            </Button>
+          </div>
 
           <div className="flex gap-2 flex-shrink-0">
-            <Button onClick={() => setAddModalOpen(true)}>+ Add Bookmark</Button>
-            <Button
-              variant="secondary"
-              onClick={openEditModal}
-            >
-              Edit Collection
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={openDeleteModal}
-              disabled={actionLoading}
-              style={{ backgroundColor: '#fecaca', color: '#dc2626' }}
-            >
-              Delete Collection
-            </Button>
+            {selectionMode && selectedBookmarkIds.size > 0 && (
+              <Button
+                onClick={openSelectedTabs}
+                style={{ backgroundColor: '#22c55e', color: 'white' }}
+              >
+                Open Selected ({selectedBookmarkIds.size})
+              </Button>
+            )}
+            {!selectionMode && (
+              <>
+                <Button onClick={() => setAddModalOpen(true)}>+ Add Bookmark</Button>
+                <Button
+                  variant="secondary"
+                  onClick={openEditModal}
+                >
+                  Edit Collection
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={openDeleteModal}
+                  disabled={actionLoading}
+                  style={{ backgroundColor: '#fecaca', color: '#dc2626' }}
+                >
+                  Delete Collection
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
@@ -409,9 +502,38 @@ export function CollectionDetailContent({ collectionId }: Props) {
             {collection.description && (
               <p>{collection.description}</p>
             )}
-            <p className="mt-1">
-              {bookmarks.length} bookmark{bookmarks.length !== 1 ? 's' : ''}
-            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <p>
+                {bookmarks.length} bookmark{bookmarks.length !== 1 ? 's' : ''}
+              </p>
+              {bookmarks.length > 0 && !selectionMode && (
+                <Button variant="secondary" onClick={() => setSelectionMode(true)} className="text-sm py-1.5 px-3">
+                  Select
+                </Button>
+              )}
+              {selectionMode && (
+                <>
+                  {selectedBookmarkIds.size < bookmarks.length && (
+                    <Button variant="secondary" onClick={selectAll} className="text-sm py-1.5 px-3">
+                      Select All
+                    </Button>
+                  )}
+                  {selectedBookmarkIds.size > 0 && (
+                    <Button variant="secondary" onClick={deselectAll} className="text-sm py-1.5 px-3">
+                      Deselect All
+                    </Button>
+                  )}
+                  <Button
+                    variant="secondary"
+                    onClick={exitSelectionMode}
+                    className="text-sm py-1.5 px-3"
+                    style={{ backgroundColor: '#fecaca', color: '#dc2626' }}
+                  >
+                    Cancel
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -429,80 +551,108 @@ export function CollectionDetailContent({ collectionId }: Props) {
         </Card>
       ) : (
         <div className="space-y-3">
-          {bookmarks.map(bookmark => (
-            <a
-              key={bookmark.id}
-              href={bookmark.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block"
-            >
-              <Card
-                className="transition-all duration-200 hover:scale-[1.02] hover:shadow-lg cursor-pointer group"
-                style={{ backgroundColor: 'var(--bg-secondary)' }}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-4">
-                    <img
-                      src={`https://www.google.com/s2/favicons?domain=${getDomain(bookmark.url)}&sz=32`}
-                      className="w-10 h-10 rounded flex-shrink-0"
-                      alt=""
-                      loading="lazy"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate group-hover:text-blue-600 transition-colors" style={{ color: 'var(--text-primary)' }}>
-                        {bookmark.title}
-                      </p>
-                      <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{bookmark.url}</p>
-                      {bookmark.description && (
-                        <p className="text-sm mt-1 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>
-                          {bookmark.description}
+          {bookmarks.map(bookmark => {
+            const isSelected = selectedBookmarkIds.has(bookmark.id)
+            return (
+              <div key={bookmark.id} className="block">
+                <Card
+                  className={`transition-all duration-200 hover:scale-[1.02] hover:shadow-lg cursor-pointer group ${
+                    selectionMode && isSelected ? 'ring-2 ring-blue-500' : ''
+                  }`}
+                  style={{ backgroundColor: 'var(--bg-secondary)' }}
+                  onClick={() => {
+                    if (selectionMode) {
+                      toggleBookmarkSelection(bookmark.id)
+                    }
+                  }}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-4">
+                      {/* Checkbox in selection mode */}
+                      {selectionMode && (
+                        <div className="flex-shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleBookmarkSelection(bookmark.id)}
+                            className="w-5 h-5 rounded cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ accentColor: '#3b82f6' }}
+                          />
+                        </div>
+                      )}
+                      <img
+                        src={`https://www.google.com/s2/favicons?domain=${getDomain(bookmark.url)}&sz=32`}
+                        className="w-10 h-10 rounded flex-shrink-0"
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-medium truncate transition-colors ${!selectionMode ? 'group-hover:text-blue-600' : ''}`} style={{ color: 'var(--text-primary)' }}>
+                          {bookmark.title}
                         </p>
+                        <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>{bookmark.url}</p>
+                        {bookmark.description && (
+                          <p className="text-sm mt-1 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>
+                            {bookmark.description}
+                          </p>
+                        )}
+                      </div>
+                      {!selectionMode && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="w-4"></span>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              toggleFavorite(bookmark.id, bookmark.is_favorite)
+                            }}
+                            className="p-2 rounded-lg transition-all group/star cursor-pointer"
+                            title={bookmark.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+                          >
+                            <svg
+                              className={`w-5 h-5 ${bookmark.is_favorite ? 'text-yellow-500' : 'text-gray-400 group-hover/star:text-yellow-500'}`}
+                              fill={bookmark.is_favorite ? "currentColor" : "none"}
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              removeFromCollection(bookmark.id)
+                            }}
+                            className="p-2 text-gray-400 hover:text-red-600 rounded-lg transition-all cursor-pointer"
+                            title="Remove from collection"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                          <a
+                            href={bookmark.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-2 text-gray-400 hover:text-blue-600 rounded-lg transition-all cursor-pointer"
+                            title="Open in new tab"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </a>
+                        </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className="w-4"></span>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          toggleFavorite(bookmark.id, bookmark.is_favorite)
-                        }}
-                        className="p-2 rounded-lg transition-all group/star cursor-pointer"
-                        title={bookmark.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-                      >
-                        <svg
-                          className={`w-5 h-5 ${bookmark.is_favorite ? 'text-yellow-500' : 'text-gray-400 group-hover/star:text-yellow-500'}`}
-                          fill={bookmark.is_favorite ? "currentColor" : "none"}
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          removeFromCollection(bookmark.id)
-                        }}
-                        className="p-2 text-gray-400 hover:text-red-600 rounded-lg transition-all cursor-pointer"
-                        title="Remove from collection"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                      <svg className="w-5 h-5 text-gray-400 hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </a>
-          ))}
+                  </CardContent>
+                </Card>
+              </div>
+            )
+          })}
         </div>
       )}
 

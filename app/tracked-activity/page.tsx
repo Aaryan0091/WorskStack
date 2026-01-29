@@ -1,13 +1,23 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { getExtensionId } from '@/lib/extension-detect'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { Card, CardContent } from '@/components/ui/card'
 import type { TabActivity } from '@/lib/types'
 
 type TimeFilter = 'today' | 'week' | 'month'
+
+interface GroupedActivity {
+  domain: string
+  url: string
+  title: string
+  totalSeconds: number
+  visitCount: number
+  lastVisited: string
+}
 
 export default function TrackedActivityPage() {
   const router = useRouter()
@@ -47,8 +57,11 @@ export default function TrackedActivityPage() {
 
   const checkTrackingStatus = () => {
     if (typeof window !== 'undefined' && (window as any).chrome) {
+      const extensionId = getExtensionId()
+      if (!extensionId) return
+
       (window as any).chrome.runtime.sendMessage(
-        'llahljdmcglglkcaadldnbpcpnkdinco',
+        extensionId,
         { action: 'getStatus' },
         (response: any) => {
           if (response && !(window as any).chrome.runtime.lastError) {
@@ -76,41 +89,6 @@ export default function TrackedActivityPage() {
     setLoading(false)
   }
 
-  const totalSeconds = activities.reduce((sum, a) => sum + (a.duration_seconds || 0), 0)
-  const totalMinutes = (totalSeconds / 60).toFixed(1)
-  const totalHours = (totalSeconds / 3600).toFixed(1)
-
-  // Filter activities based on time period
-  const getFilteredActivities = () => {
-    const now = new Date()
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const weekAgo = new Date(today)
-    weekAgo.setDate(weekAgo.getDate() - 7)
-    const monthAgo = new Date(today)
-    monthAgo.setMonth(monthAgo.getMonth() - 1)
-
-    return activities.filter(item => {
-      if (!item.started_at) return false
-      const itemDate = new Date(item.started_at)
-
-      switch (timeFilter) {
-        case 'today':
-          return itemDate >= today
-        case 'week':
-          return itemDate >= weekAgo
-        case 'month':
-          return itemDate >= monthAgo
-        default:
-          return true
-      }
-    })
-  }
-
-  const filteredActivities = getFilteredActivities()
-  const filteredSeconds = filteredActivities.reduce((sum, a) => sum + (a.duration_seconds || 0), 0)
-  const filteredMinutes = (filteredSeconds / 60).toFixed(1)
-  const filteredHours = (filteredSeconds / 3600).toFixed(1)
-
   const formatDuration = (seconds: number) => {
     if (seconds < 60) return `${seconds}s`
     const mins = Math.floor(seconds / 60)
@@ -122,15 +100,6 @@ export default function TrackedActivityPage() {
     return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
   }
 
-  const formatTotalTime = (seconds: number) => {
-    const hrs = Math.floor(seconds / 3600)
-    const mins = Math.floor((seconds % 3600) / 60)
-    if (hrs > 0) {
-      return `${hrs}h ${mins}m`
-    }
-    return `${mins}m`
-  }
-
   const getDomain = (url: string) => {
     try {
       return new URL(url).hostname
@@ -138,6 +107,78 @@ export default function TrackedActivityPage() {
       return url
     }
   }
+
+  // Filter activities based on time period
+  const filteredActivities = useMemo(() => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+    // Get start of current week (Sunday)
+    const startOfWeek = new Date(today)
+    const dayOfWeek = startOfWeek.getDay()
+    startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek)
+    startOfWeek.setHours(0, 0, 0, 0)
+
+    // Get start of current month
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    startOfMonth.setHours(0, 0, 0, 0)
+
+    return activities.filter(item => {
+      if (!item.started_at) return false
+      const itemDate = new Date(item.started_at)
+
+      switch (timeFilter) {
+        case 'today':
+          return itemDate >= today
+        case 'week':
+          return itemDate >= startOfWeek
+        case 'month':
+          return itemDate >= startOfMonth
+        default:
+          return true
+      }
+    })
+  }, [activities, timeFilter])
+
+  // Group activities by domain
+  const groupedActivities = useMemo(() => {
+    const groups = new Map<string, GroupedActivity>()
+
+    filteredActivities.forEach(item => {
+      const domain = getDomain(item.url)
+
+      if (!groups.has(domain)) {
+        groups.set(domain, {
+          domain,
+          url: item.url,
+          title: item.title || item.url,
+          totalSeconds: item.duration_seconds || 0,
+          visitCount: 1,
+          lastVisited: item.started_at || ''
+        })
+      } else {
+        const existing = groups.get(domain)!
+        existing.totalSeconds += item.duration_seconds || 0
+        existing.visitCount += 1
+        // Keep the most recent last visited date
+        if (item.started_at && item.started_at > existing.lastVisited) {
+          existing.lastVisited = item.started_at
+        }
+        // Keep the most recent title
+        if (item.title && item.started_at >= existing.lastVisited) {
+          existing.title = item.title
+        }
+      }
+    })
+
+    // Convert to array and sort by total time spent (descending)
+    return Array.from(groups.values()).sort((a, b) => b.totalSeconds - a.totalSeconds)
+  }, [filteredActivities])
+
+  const totalSeconds = groupedActivities.reduce((sum, a) => sum + a.totalSeconds, 0)
+  const totalMinutes = (totalSeconds / 60).toFixed(1)
+  const totalHours = (totalSeconds / 3600).toFixed(1)
+  const uniqueSitesCount = groupedActivities.length
 
   return (
     <DashboardLayout>
@@ -154,42 +195,68 @@ export default function TrackedActivityPage() {
         </div>
 
         {/* Time Filter Buttons */}
-        <div className="flex gap-2">
-          {(['today', 'week', 'month'] as TimeFilter[]).map((filter) => (
-            <button
-              key={filter}
-              onClick={() => setTimeFilter(filter)}
-              className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 cursor-pointer ${
-                timeFilter === filter
-                  ? 'bg-blue-600 text-white'
-                  : 'hover:scale-105'
-              }`}
-              style={{
-                backgroundColor: timeFilter !== filter ? 'var(--bg-secondary)' : undefined,
-                color: timeFilter !== filter ? 'var(--text-primary)' : undefined
-              }}
-            >
-              {filter === 'today' ? 'Today' : filter === 'week' ? 'This Week' : 'This Month'}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex gap-2">
+            {(['today', 'week', 'month'] as TimeFilter[]).map((filter) => (
+              <button
+                key={filter}
+                onClick={() => setTimeFilter(filter)}
+                className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 cursor-pointer ${
+                  timeFilter === filter
+                    ? 'bg-blue-600 text-white'
+                    : 'hover:scale-105'
+                }`}
+                style={{
+                  backgroundColor: timeFilter !== filter ? 'var(--bg-secondary)' : undefined,
+                  color: timeFilter !== filter ? 'var(--text-primary)' : undefined
+                }}
+              >
+                {filter === 'today' ? 'Today' : filter === 'week' ? 'This Week' : 'This Month'}
+              </button>
+            ))}
+          </div>
+
+          {/* Date range display */}
+          <span className="text-sm px-3 py-2 rounded-lg" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+            {(() => {
+              const now = new Date()
+              const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+              const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
+
+              if (timeFilter === 'today') {
+                return `Showing: ${today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
+              } else if (timeFilter === 'week') {
+                const startOfWeek = new Date(today)
+                const dayOfWeek = startOfWeek.getDay()
+                startOfWeek.setDate(startOfWeek.getDate() - dayOfWeek)
+                const endOfWeek = new Date(startOfWeek)
+                endOfWeek.setDate(endOfWeek.getDate() + 6)
+                return `Showing: ${startOfWeek.toLocaleDateString('en-US', options)} - ${endOfWeek.toLocaleDateString('en-US', options)}`
+              } else {
+                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+                const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+                return `Showing: ${startOfMonth.toLocaleDateString('en-US', { month: 'long' })} 1 - ${endOfMonth.getDate()}`
+              }
+            })()}
+          </span>
         </div>
 
         <div className="grid grid-cols-3 gap-4">
           <Card>
             <CardContent className="p-6 text-center">
-              <p className="text-3xl font-bold text-blue-600">{filteredActivities.length}</p>
-              <p style={{ color: 'var(--text-secondary)' }}>Tracked Tabs</p>
+              <p className="text-3xl font-bold text-blue-600">{uniqueSitesCount}</p>
+              <p style={{ color: 'var(--text-secondary)' }}>Unique Sites</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-6 text-center">
-              <p className="text-3xl font-bold text-green-600">{filteredMinutes}</p>
+              <p className="text-3xl font-bold text-green-600">{totalMinutes}</p>
               <p style={{ color: 'var(--text-secondary)' }}>Total Minutes</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-6 text-center">
-              <p className="text-3xl font-bold text-purple-600">{filteredHours}</p>
+              <p className="text-3xl font-bold text-purple-600">{totalHours}</p>
               <p style={{ color: 'var(--text-secondary)' }}>Total Hours</p>
             </CardContent>
           </Card>
@@ -201,7 +268,7 @@ export default function TrackedActivityPage() {
               <div key={i} className="p-4 rounded-lg animate-pulse" style={{ backgroundColor: 'var(--bg-secondary)' }} />
             ))}
           </div>
-        ) : filteredActivities.length === 0 ? (
+        ) : groupedActivities.length === 0 ? (
           <Card>
             <CardContent className="p-12 text-center" style={{ color: 'var(--text-secondary)' }}>
               {activities.length === 0
@@ -213,16 +280,16 @@ export default function TrackedActivityPage() {
           <Card>
             <CardContent className="p-4">
               <div className="space-y-2">
-                {filteredActivities.map((item) => (
+                {groupedActivities.map((item) => (
                   <a
-                    key={item.id}
+                    key={item.domain}
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block"
                   >
                     <div
-                      className="p-3 rounded-lg transition-all duration-200 hover:scale-[1.02] hover:shadow-lg"
+                      className="p-4 rounded-lg transition-all duration-200 hover:scale-[1.01] hover:shadow-lg"
                       style={{
                         backgroundColor: 'var(--bg-secondary)',
                         cursor: 'pointer'
@@ -230,25 +297,32 @@ export default function TrackedActivityPage() {
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.1)'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'}
                     >
-                      <div className="flex items-start gap-4">
+                      <div className="flex items-center gap-4">
                         <img
-                          src={`https://www.google.com/s2/favicons?domain=${getDomain(item.url)}&sz=32`}
-                          className="w-8 h-8 rounded flex-shrink-0"
+                          src={`https://www.google.com/s2/favicons?domain=${item.domain}&sz=32`}
+                          className="w-10 h-10 rounded flex-shrink-0"
                           alt=""
                           loading="lazy"
                         />
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate hover:text-blue-600 transition-colors" style={{ color: 'var(--text-primary)' }}>
-                            {item.title || item.url}
-                          </p>
-                          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{getDomain(item.url)}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium truncate hover:text-blue-600 transition-colors" style={{ color: 'var(--text-primary)' }}>
+                              {item.title}
+                            </p>
+                            {item.visitCount > 1 && (
+                              <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
+                                {item.visitCount} {item.visitCount === 1 ? 'visit' : 'visits'}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{item.domain}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <span className="font-medium text-green-600">
-                            {formatDuration(item.duration_seconds || 0)}
+                          <span className="font-semibold text-green-600">
+                            {formatDuration(item.totalSeconds)}
                           </span>
                           <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                            time spent
+                            total time
                           </p>
                         </div>
                       </div>

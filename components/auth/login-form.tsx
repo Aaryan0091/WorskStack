@@ -93,29 +93,54 @@ export function LoginForm({ onToggleMode }: LoginFormProps) {
   }
 
   return (
-    <form onSubmit={handleLogin} className="space-y-4">
-      <Input
-        type="email"
-        label="Email"
-        placeholder="you@example.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-      />
+    <form onSubmit={handleLogin} className="space-y-5">
+      {/* Email input with icon */}
       <div className="relative">
-        <Input
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+        </span>
+        <input
+          type="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="w-full pl-10 pr-4 py-3 rounded-lg border focus:outline-none focus:ring-2 transition-all"
+          style={{
+            backgroundColor: 'var(--bg-secondary)',
+            borderColor: error ? '#ef4444' : 'var(--border-color)',
+            color: 'var(--text-primary)'
+          }}
+        />
+      </div>
+
+      {/* Password input with icon and show/hide */}
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+        </span>
+        <input
           type={showPassword ? 'text' : 'password'}
-          label="Password"
           placeholder="••••••••"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          className="w-full pl-10 pr-12 py-3 rounded-lg border focus:outline-none focus:ring-2 transition-all"
+          style={{
+            backgroundColor: 'var(--bg-secondary)',
+            borderColor: error ? '#ef4444' : 'var(--border-color)',
+            color: 'var(--text-primary)'
+          }}
         />
         <button
           type="button"
           onClick={() => setShowPassword(!showPassword)}
-          className="absolute right-3 top-9 text-gray-500 hover:text-gray-700"
-          style={{ cursor: 'pointer' }}
+          className="absolute right-3 top-1/2 -translate-y-1/2 transition-all hover:scale-110"
+          style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}
         >
           {showPassword ? (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -129,20 +154,50 @@ export function LoginForm({ onToggleMode }: LoginFormProps) {
           )}
         </button>
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? 'Signing in...' : 'Sign In'}
-      </Button>
-      <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
-        Don't have an account?{' '}
-        <button
-          type="button"
-          onClick={onToggleMode}
-          className="text-blue-600 hover:underline"
-        >
-          Sign up
+
+      {/* Forgot password link */}
+      <div className="flex justify-end">
+        <button type="button" className="text-sm hover:underline transition-all" style={{ color: '#8b5cf6' }}>
+          Forgot password?
         </button>
-      </p>
+      </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="flex items-center gap-2 p-3 rounded-lg" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+          <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="#ef4444" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="text-sm" style={{ color: '#ef4444' }}>{error}</span>
+        </div>
+      )}
+
+      {/* Submit button */}
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full py-3 rounded-lg font-medium transition-all duration-75 active:scale-95 hover:scale-[1.02] flex items-center justify-center gap-2"
+        style={{
+          background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+          color: 'white',
+          cursor: loading ? 'not-allowed' : 'pointer',
+          opacity: loading ? 0.7 : 1
+        }}
+      >
+        {loading ? (
+          <>
+            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            <span>Signing in...</span>
+          </>
+        ) : (
+          <>
+            <span>Sign in</span>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </>
+        )}
+      </button>
     </form>
   )
 }
