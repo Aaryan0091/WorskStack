@@ -17,13 +17,12 @@ interface Props {
   bookmarkTags: Record<string, Tag[]>
 }
 
-export function BookmarksClient({ bookmarks: initialBookmarks, tags, bookmarkTags: initialBookmarkTags }: Props) {
+export function BookmarksClient({ bookmarks: initialBookmarks, tags, bookmarkTags }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [isPending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
 
   const [bookmarks, setBookmarks] = useState(initialBookmarks)
-  const [bookmarkTags, setBookmarkTags] = useState(initialBookmarkTags)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
@@ -51,15 +50,18 @@ export function BookmarksClient({ bookmarks: initialBookmarks, tags, bookmarkTag
     if (addUrl && !processedUrlParams.current) {
       processedUrlParams.current = true
       // Pre-fill form and open modal
-      setFormData({
-        url: decodeURIComponent(addUrl),
-        title: addTitle ? decodeURIComponent(addTitle) : '',
-        description: '',
-        notes: '',
-        folder_id: '',
-        tag_ids: [],
-      })
-      setModalOpen(true)
+      // Delay setState to avoid triggering during render
+      setTimeout(() => {
+        setFormData({
+          url: decodeURIComponent(addUrl),
+          title: addTitle ? decodeURIComponent(addTitle) : '',
+          description: '',
+          notes: '',
+          folder_id: '',
+          tag_ids: [],
+        })
+        setModalOpen(true)
+      }, 0)
 
       // Clear URL params
       window.history.replaceState({}, '', '/bookmarks')
@@ -154,7 +156,7 @@ export function BookmarksClient({ bookmarks: initialBookmarks, tags, bookmarkTag
     if (bookmark) {
       setEditingBookmark(bookmark)
       const { data } = await supabase.from('bookmark_tags').select('tag_id').eq('bookmark_id', bookmark.id)
-      const tagIds = data?.map((bt: any) => bt.tag_id) || []
+      const tagIds = data?.map((bt: { tag_id: string }) => bt.tag_id) || []
       setFormData({
         url: bookmark.url,
         title: bookmark.title,
@@ -253,6 +255,7 @@ export function BookmarksClient({ bookmarks: initialBookmarks, tags, bookmarkTag
               <Card key={bookmark.id} className={`${bookmark.is_read ? 'opacity-60' : ''}`}>
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`https://www.google.com/s2/favicons?domain=${new URL(bookmark.url).hostname}&sz=32`}
                       className="w-8 h-8 rounded"

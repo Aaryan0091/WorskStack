@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from 'next-themes'
 import { Modal } from '@/components/ui/modal'
@@ -61,6 +61,7 @@ export function Sidebar() {
     navItems.forEach((item) => {
       router.prefetch(item.href)
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleLogout = async () => {

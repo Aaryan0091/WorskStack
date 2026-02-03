@@ -7,6 +7,19 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!
 const GROQ_API_KEY = process.env.GROQ_API_KEY!
 
+interface Bookmark {
+  id: string
+  user_id: string
+  url: string
+  title?: string
+  description?: string | null
+  bookmark_tags?: Array<{ tags?: { name?: string } }>
+}
+
+interface ScoredBookmark extends Bookmark {
+  _score: number
+}
+
 // Add CORS headers
 function corsHeaders(response: NextResponse) {
   response.headers.set('Access-Control-Allow-Origin', '*')
@@ -16,7 +29,7 @@ function corsHeaders(response: NextResponse) {
 }
 
 // Handle OPTIONS preflight request
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return corsHeaders(new NextResponse(null, { status: 200 }))
 }
 
@@ -98,7 +111,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Score and rank bookmarks based on expanded terms
-    const scoredBookmarks = (bookmarks || []).map((bookmark: any) => {
+    const scoredBookmarks = (bookmarks || []).map((bookmark: Bookmark): ScoredBookmark => {
       let score = 0
       const searchLower = query.toLowerCase()
       const titleLower = (bookmark.title || '').toLowerCase()
@@ -106,7 +119,7 @@ export async function POST(request: NextRequest) {
       const urlLower = bookmark.url.toLowerCase()
 
       // Get all tag names
-      const tagNames = (bookmark.bookmark_tags || []).map((bt: any) => bt.tags?.name).filter(Boolean)
+      const tagNames = (bookmark.bookmark_tags || []).map((bt) => bt.tags?.name).filter(Boolean) as string[]
 
       // Direct query matches (highest weight)
       if (titleLower.includes(searchLower)) score += 10
@@ -120,7 +133,7 @@ export async function POST(request: NextRequest) {
         if (titleLower.includes(termLower)) score += 4
         if (descLower.includes(termLower)) score += 2
         if (urlLower.includes(termLower)) score += 1
-        if (tagNames.some((tn: string) => tn.toLowerCase().includes(termLower))) score += 3
+        if (tagNames.some((tn) => tn.toLowerCase().includes(termLower))) score += 3
       }
 
       // Tag matches
@@ -135,8 +148,9 @@ export async function POST(request: NextRequest) {
 
     // 4. Filter out zero-score results and sort by score
     const results = scoredBookmarks
-      .filter((b: any) => b._score > 0)
-      .sort((a: any, b: any) => b._score - a._score)
+      .filter((b: ScoredBookmark) => b._score > 0)
+      .sort((a: ScoredBookmark, b: ScoredBookmark) => b._score - a._score)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       .map(({ _score, ...bookmark }) => bookmark)
 
     const response = NextResponse.json({

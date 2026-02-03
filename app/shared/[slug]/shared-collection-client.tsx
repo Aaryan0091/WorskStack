@@ -54,6 +54,7 @@ export function SharedCollectionClient({ collection, bookmarks: initialBookmarks
           description: collection.description,
           is_public: false,
           share_slug: `my-collection-${crypto.randomUUID().substr(0, 8)}`,
+          share_code: Math.random().toString(36).substring(2, 10),
           created_at: new Date().toISOString()
         }
 
@@ -269,7 +270,7 @@ export function SharedCollectionClient({ collection, bookmarks: initialBookmarks
       <Modal isOpen={saveModalOpen} onClose={() => setSaveModalOpen(false)} title="Save to My Collections">
         <div className="space-y-4">
           <p style={{ color: 'var(--text-secondary)' }}>
-            This will create a copy of <strong>"{collection.name}"</strong> ({initialBookmarks.length} bookmarks) in your collections.
+            This will create a copy of <strong>&ldquo;{collection.name}&rdquo;</strong> ({initialBookmarks.length} bookmarks) in your collections.
             You can then edit it however you want without affecting the original.
           </p>
           {saved ? (

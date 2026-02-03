@@ -4,8 +4,8 @@ import { useRef } from 'react'
 
 interface BookmarksHeaderProps {
   isGuest?: boolean
-  bookmarks?: any[]
-  onImport?: (data: any) => void
+  bookmarks?: Array<{ url: string; title: string; description?: string | null; notes?: string | null; is_favorite: boolean; is_read: boolean; created_at: string }>
+  onImport?: (data: { bookmarks: Array<{ url: string; title?: string; description?: string; notes?: string; is_favorite?: boolean; is_read?: boolean }> }) => void
   importing?: boolean
   onError?: (message: string) => void
 }
@@ -52,7 +52,7 @@ export function BookmarksHeader({ isGuest = false, bookmarks = [], onImport, imp
         } else {
           onError?.('Invalid file format. Please export from WorkStack and try again.')
         }
-      } catch (error) {
+      } catch {
         onError?.('Error reading file. Please try again.')
       }
     }

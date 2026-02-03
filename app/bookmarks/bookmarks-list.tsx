@@ -11,9 +11,7 @@ import { OpenTabsModal } from '@/components/open-tabs-modal'
 import { Toast, ConfirmDialog } from '@/components/ui/toast'
 import type { Bookmark, Tag } from '@/lib/types'
 import {
-  guestStoreGet,
   guestStoreSet,
-  guestStoreRemove,
   GUEST_KEYS
 } from '@/lib/guest-storage'
 
@@ -33,7 +31,7 @@ const BookmarkCard = memo(({ bookmark, tags, onFavorite, onRead, onEdit, onDelet
   onEdit: () => void
   onDelete: () => void
   onAddToCollection: () => void
-}) => {
+}): React.ReactElement => {
   const getDomain = (url: string) => {
     try { return new URL(url).hostname }
     catch { return url }
@@ -48,6 +46,7 @@ const BookmarkCard = memo(({ bookmark, tags, onFavorite, onRead, onEdit, onDelet
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div className="w-8 h-8 rounded flex items-center justify-center text-sm font-semibold" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`https://www.google.com/s2/favicons?domain=${getDomain(bookmark.url)}&sz=32`}
               className="w-8 h-8 rounded"
@@ -148,7 +147,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
   const [modalOpen, setModalOpen] = useState(false)
   const [openTabsModalOpen, setOpenTabsModalOpen] = useState(false)
   const [collectionModalOpen, setCollectionModalOpen] = useState(false)
-  const [collections, setCollections] = useState<any[]>([])
+  const [collections, setCollections] = useState<Array<{ id: string; name: string; description?: string | null; is_public: boolean }>>([])
   const [collectionsLoading, setCollectionsLoading] = useState(false)
   const [bookmarkForCollection, setBookmarkForCollection] = useState<Bookmark | null>(null)
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<Set<string>>(new Set())
@@ -230,6 +229,8 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
   useEffect(() => {
     if (isGuest) return
 
+    const timeoutIds: NodeJS.Timeout[] = []
+
     const channel = supabase
       .channel('bookmarks-realtime')
       .on(
@@ -239,28 +240,34 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           schema: 'public',
           table: 'bookmarks'
         },
-        async (payload: any) => {
+        async (payload: { new: Bookmark; old?: Bookmark }) => {
           console.log('Realtime INSERT:', payload.new)
-          const newBookmark = payload.new as Bookmark
+          const newBookmark = payload.new
 
           // Add bookmark to state
           setBookmarks(prev => [newBookmark, ...prev])
 
-          // Fetch tags for the new bookmark (with small delay to ensure tags are saved)
-          setTimeout(async () => {
-            const { data: tagData } = await supabase
-              .from('bookmark_tags')
-              .select('tag_id, tags(*)')
-              .eq('bookmark_id', newBookmark.id)
+          // Fetch tags for the new bookmark with cleanup tracking
+          const timeoutId = setTimeout(async () => {
+            try {
+              const { data: tagData } = await supabase
+                .from('bookmark_tags')
+                .select('tag_id, tags(*)')
+                .eq('bookmark_id', newBookmark.id)
 
-            const fetchedTags = tagData?.map((bt: any) => bt.tags).filter(Boolean) || []
-            console.log('Fetched tags for new bookmark:', fetchedTags)
+              const fetchedTags = tagData?.map((bt: { tags: Tag }) => bt.tags).filter(Boolean) || []
+              console.log('Fetched tags for new bookmark:', fetchedTags)
 
-            setBookmarkTags(prev => ({
-              ...prev,
-              [newBookmark.id]: fetchedTags
-            }))
+              setBookmarkTags(prev => ({
+                ...prev,
+                [newBookmark.id]: fetchedTags
+              }))
+            } catch (error) {
+              console.error('Failed to fetch tags for new bookmark:', error)
+            }
           }, 500)
+
+          timeoutIds.push(timeoutId)
         }
       )
       .on(
@@ -270,9 +277,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           schema: 'public',
           table: 'bookmarks'
         },
-        (payload: any) => {
+        (payload: { new: Bookmark }) => {
           console.log('Realtime UPDATE:', payload.new)
-          setBookmarks(prev => prev.map(b => b.id === payload.new.id ? payload.new as Bookmark : b))
+          setBookmarks(prev => prev.map(b => b.id === payload.new.id ? payload.new : b))
         }
       )
       .on(
@@ -282,7 +289,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           schema: 'public',
           table: 'bookmarks'
         },
-        (payload: any) => {
+        (payload: { old: Bookmark }) => {
           console.log('Realtime DELETE:', payload.old)
           setBookmarks(prev => prev.filter(b => b.id !== payload.old.id))
         }
@@ -294,7 +301,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           schema: 'public',
           table: 'bookmark_tags'
         },
-        async (payload: any) => {
+        async (payload: { new: { bookmark_id: string } }) => {
           console.log('Realtime bookmark_tag INSERT:', payload.new)
           const bookmarkId = payload.new.bookmark_id
 
@@ -304,7 +311,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
             .select('tag_id, tags(*)')
             .eq('bookmark_id', bookmarkId)
 
-          const fetchedTags = tagData?.map((bt: any) => bt.tags).filter(Boolean) || []
+          const fetchedTags = tagData?.map((bt: { tags: Tag }) => bt.tags).filter(Boolean) || []
 
           setBookmarkTags(prev => ({
             ...prev,
@@ -317,6 +324,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
       })
 
     return () => {
+      // Clear all pending timeouts
+      timeoutIds.forEach(id => clearTimeout(id))
+      // Remove the Supabase channel
       supabase.removeChannel(channel)
     }
   }, [isGuest])
@@ -326,41 +336,57 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
     if (isGuest) return
 
     const cleanupUnusedTags = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
 
-      // Get used tag IDs
-      const { data: usedTagIds } = await supabase
-        .from('bookmark_tags')
-        .select('tag_id')
+        // Get used tag IDs
+        const { data: usedTagIds, error: usedTagsError } = await supabase
+          .from('bookmark_tags')
+          .select('tag_id')
 
-      const usedIds = new Set(usedTagIds?.map((bt: { tag_id: string }) => bt.tag_id) || [])
-
-      // Find unused tag IDs first (before modifying array)
-      const unusedTagIds: string[] = []
-      for (const tag of tags) {
-        if (!usedIds.has(tag.id)) {
-          unusedTagIds.push(tag.id)
+        if (usedTagsError) {
+          console.error('Failed to fetch used tag IDs:', usedTagsError)
+          return
         }
-      }
 
-      if (unusedTagIds.length === 0) return
+        const usedIds = new Set(usedTagIds?.map((bt: { tag_id: string }) => bt.tag_id) || [])
 
-      // Remove unused tags from the array (in-place, reverse order)
-      for (let i = tags.length - 1; i >= 0; i--) {
-        if (!usedIds.has(tags[i].id)) {
-          tags.splice(i, 1)
+        // Find unused tag IDs first (before modifying array)
+        const unusedTagIds: string[] = []
+        for (const tag of tags) {
+          if (!usedIds.has(tag.id)) {
+            unusedTagIds.push(tag.id)
+          }
         }
-      }
 
-      // Delete from database in background
-      await supabase
-        .from('tags')
-        .delete()
-        .in('id', unusedTagIds)
+        if (unusedTagIds.length === 0) return
+
+        // Remove unused tags from the array (in-place, reverse order)
+        for (let i = tags.length - 1; i >= 0; i--) {
+          if (!usedIds.has(tags[i].id)) {
+            tags.splice(i, 1)
+          }
+        }
+
+        // Delete from database in background with error handling
+        const { error: deleteError } = await supabase
+          .from('tags')
+          .delete()
+          .in('id', unusedTagIds)
+
+        if (deleteError) {
+          console.error('Failed to delete unused tags from database:', deleteError)
+        } else {
+          console.log(`Cleaned up ${unusedTagIds.length} unused tag(s)`)
+        }
+      } catch (error) {
+        console.error('Error during tag cleanup:', error)
+      }
     }
 
     cleanupUnusedTags()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGuest])
 
   // Save to localStorage for guest mode
@@ -443,7 +469,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
         .eq('bookmark_id', bookmark.id)
 
       if (latestCollections) {
-        const latestIds = new Set<string>(latestCollections.map((c: any) => c.collection_id as string))
+        const latestIds = new Set<string>(latestCollections.map((c: { collection_id: string }) => c.collection_id))
         // Update cache
         setBookmarkCollectionMap(prev => ({
           ...prev,
@@ -518,7 +544,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           .select('collection_id')
           .eq('bookmark_id', bookmarkId)
 
-        const existingIds = new Set<string>(existingCollections?.map((c: any) => c.collection_id as string) || [])
+        const existingIds = new Set<string>(existingCollections?.map((c: { collection_id: string }) => c.collection_id) || [])
 
         // Add to new collections
         const toAdd = Array.from(targetCollectionIds).filter(id => !existingIds.has(id))
@@ -584,27 +610,41 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           await supabase.from('bookmarks').delete().eq('id', id)
           setBookmarks(updated)
 
-          // Auto-cleanup unused tags in background
-          const { data: usedTagIds } = await supabase
-            .from('bookmark_tags')
-            .select('tag_id')
+          // Auto-cleanup unused tags in background with error handling
+          try {
+            const { data: usedTagIds, error: usedTagsError } = await supabase
+              .from('bookmark_tags')
+              .select('tag_id')
 
-          const usedIds = new Set(usedTagIds?.map((bt: { tag_id: string }) => bt.tag_id) || [])
-          const unusedTags = tags.filter(t => !usedIds.has(t.id))
+            if (usedTagsError) {
+              console.error('Failed to fetch used tag IDs:', usedTagsError)
+            } else {
+              const usedIds = new Set(usedTagIds?.map((bt: { tag_id: string }) => bt.tag_id) || [])
+              const unusedTags = tags.filter(t => !usedIds.has(t.id))
 
-          if (unusedTags.length > 0) {
-            // Remove from local state
-            unusedTags.forEach(tag => {
-              const index = tags.findIndex(t => t.id === tag.id)
-              if (index > -1) {
-                tags.splice(index, 1)
+              if (unusedTags.length > 0) {
+                // Remove from local state
+                unusedTags.forEach(tag => {
+                  const index = tags.findIndex(t => t.id === tag.id)
+                  if (index > -1) {
+                    tags.splice(index, 1)
+                  }
+                })
+                // Delete from database with error handling
+                const { error: deleteError } = await supabase
+                  .from('tags')
+                  .delete()
+                  .in('id', unusedTags.map(t => t.id))
+
+                if (deleteError) {
+                  console.error('Failed to delete unused tags:', deleteError)
+                } else {
+                  console.log(`Cleaned up ${unusedTags.length} unused tag(s) after deletion`)
+                }
               }
-            })
-            // Delete from database
-            await supabase
-              .from('tags')
-              .delete()
-              .in('id', unusedTags.map(t => t.id))
+            }
+          } catch (error) {
+            console.error('Error during tag cleanup after deletion:', error)
           }
         }
         setConfirmDialog(null)
@@ -677,7 +717,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
       } else if (data.suggested && data.suggested.length > 0) {
         // Store suggestions - don't auto-select, let user choose
         setAiSuggestions(data.suggested)
-        setAiSuggestedTagIds(new Set(data.suggested.map((t: any) => t.id)))
+        setAiSuggestedTagIds(new Set(data.suggested.map((t: { id: string }) => t.id)))
 
         const summary = data.summary
         setToast({

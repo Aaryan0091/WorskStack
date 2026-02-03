@@ -7,6 +7,21 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!
 const GROQ_API_KEY = process.env.GROQ_API_KEY!
 
+interface Bookmark {
+  id: string
+  user_id: string
+  url: string
+  title?: string
+  description?: string | null
+  is_read: boolean
+  is_favorite: boolean
+  created_at: string
+}
+
+interface ScoredBookmark extends Bookmark {
+  _score: number
+}
+
 // Add CORS headers
 function corsHeaders(response: NextResponse) {
   response.headers.set('Access-Control-Allow-Origin', '*')
@@ -16,7 +31,7 @@ function corsHeaders(response: NextResponse) {
 }
 
 // Handle OPTIONS preflight request
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return corsHeaders(new NextResponse(null, { status: 200 }))
 }
 
@@ -89,40 +104,48 @@ export async function POST(request: NextRequest) {
     // 3. Use AI to find related topics/terms
     const groq = new Groq({ apiKey: GROQ_API_KEY })
 
-    const prompt = `You are a recommendation engine. Extract 3-5 search queries from the user's reading list that would help find semantically similar content.
+    const prompt = `You are a semantic recommendation engine. Your goal is to understand the TOPICS and THEMES of the user's reading list, then generate search queries that would find RELATED content across ANY domain.
 
 Current Reading List:
 ${contextText}
 
 CRITICAL GUIDELINES:
 1. Return ONLY a JSON object with a "queries" array
-2. Extract meaningful keywords: movie names, song titles, topics, people, or themes
-3. Keep queries to 1-3 words each
-4. Split compound titles: If you see "dhurandar title track", extract BOTH "dhurandar" AND "title track"
-5. Extract proper nouns, names, and unique identifiers
-6. If you see a pipe character (|), split on it: "song | movie" becomes ["song", "movie"]
-7. Common words to ignore: "the", "a", "an", "in", "on", "at", "for", "video", "youtube", "watch"
+2. Think about TOPICS, THEMES, and CONCEPTS - not just exact words
+3. Generate 5-8 diverse search queries that would find semantically related content
+4. Include: specific entities, broader topics, related technologies, synonyms, and adjacent concepts
 
-Example 1 - Single item with multiple parts:
-Input: "dhurandar title track"
-Output: { "queries": ["dhurandar", "title track"] }
+SEMANTIC EXPANSION STRATEGY:
+- If you see "ChatGPT", also extract: "AI assistant", "language model", "OpenAI", "GPT"
+- If you see "React tutorial", also extract: "frontend framework", "JavaScript library", "web development"
+- If you see "AI agent", also extract: "autonomous AI", "AI assistant", "AI bot", "agent system"
+- If you see "Python script", also extract: "coding", "programming", "development"
+- If you see a specific product, also extract: the category, competitors, use cases
 
-Example 2 - Movie/song with separator:
-Input: "shararat | dhurandar"
-Output: { "queries": ["shararat", "dhurandar"] }
+EXAMPLES:
 
-Example 3 - Multiple related items:
-Input: "Movie Name - Part 1", "Movie Name - Part 2"
-Output: { "queries": ["Movie Name", "Part 1", "Part 2"] }
+Example 1 - AI/Tech content:
+Input: "Claude AI Agent Tutorial", "Building AI Agents with LangChain"
+Output: { "queries": ["AI agent", "Claude", "LangChain", "autonomous AI", "AI assistant", "language model", "agent framework", "AI development"] }
 
-Now extract queries from this reading list:`
+Example 2 - YouTube/Entertainment:
+Input: "dhurandar title track", "shararat song"
+Output: { "queries": ["dhurandar", "title track", "shararat", "music", "soundtrack", "bollywood", "song"] }
+
+Example 3 - Development:
+Input: "Next.js tutorial", "React best practices"
+Output: { "queries": ["Next.js", "React", "frontend", "framework", "JavaScript", "web development", "SSR", "Vercel"] }
+
+IMPORTANT: The goal is to find RELATED content even if it uses different terminology or is on a different website. Think like a human making connections between related topics.
+
+Now extract semantic queries from this reading list:`
 
     try {
       const aiResponse = await groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens: 150,
+        temperature: 0.5, // Increased for more creative/semantic associations
+        max_tokens: 300, // Increased to allow for more queries
         response_format: { type: 'json_object' },
       })
 
@@ -150,30 +173,46 @@ Now extract queries from this reading list:`
         .eq('user_id', user.id)
 
       // Filter out reading list items
-      const otherBookmarks = (allBookmarks || []).filter((b: any) => !readingListIds.includes(b.id))
+      const otherBookmarks = (allBookmarks || []).filter((b: Bookmark) => !readingListIds.includes(b.id))
 
-      // Score bookmarks based on query matches
-      const scoredBookmarks = otherBookmarks.map((bookmark: any) => {
+      // Score bookmarks based on query matches with improved semantic matching
+      const scoredBookmarks = otherBookmarks.map((bookmark: Bookmark): ScoredBookmark => {
         let score = 0
         const titleLower = (bookmark.title || '').toLowerCase()
         const descLower = (bookmark.description || '').toLowerCase()
         const urlLower = bookmark.url.toLowerCase()
+        const titleWords = titleLower.split(/\s+/)
+        const descWords = descLower.split(/\s+/)
 
         for (const query of queries) {
           const queryLower = query.toLowerCase()
-          if (titleLower.includes(queryLower)) score += 5
-          if (descLower.includes(queryLower)) score += 2
-          if (urlLower.includes(queryLower)) score += 1
+          const queryWords = queryLower.split(/\s+/)
+
+          // Exact phrase match (highest score)
+          if (titleLower.includes(queryLower)) score += 10
+          if (descLower.includes(queryLower)) score += 5
+          if (urlLower.includes(queryLower)) score += 2
+
+          // Partial word matching for multi-word queries
+          // e.g., "AI agent" should match if title has "AI" or "agent"
+          for (const qWord of queryWords) {
+            if (qWord.length < 3) continue // Skip very short words
+
+            // Match against individual words
+            if (titleWords.some(w => w.includes(qWord) || qWord.includes(w))) score += 3
+            if (descWords.some(w => w.includes(qWord) || qWord.includes(w))) score += 1
+          }
         }
 
         return { ...bookmark, _score: score }
       })
 
-      // Filter and sort by score
+      // Filter and sort by score - return up to 12 recommendations
       const recommendations = scoredBookmarks
-        .filter((b: any) => b._score > 0)
-        .sort((a: any, b: any) => b._score - a._score)
-        .slice(0, 6)
+        .filter((b: ScoredBookmark) => b._score > 0)
+        .sort((a: ScoredBookmark, b: ScoredBookmark) => b._score - a._score)
+        .slice(0, 12)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .map(({ _score, ...bookmark }) => bookmark)
 
       const response = NextResponse.json({

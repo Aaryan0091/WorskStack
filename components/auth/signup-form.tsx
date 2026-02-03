@@ -5,10 +5,6 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { markUserSignedIn } from '@/lib/guest-storage'
 
-interface SignupFormProps {
-  onToggleMode: () => void
-}
-
 // Password strength checker
 function getPasswordStrength(password: string): { score: number; label: string; color: string } {
   if (!password) return { score: 0, label: '', color: '#e5e7eb' }
@@ -26,7 +22,7 @@ function getPasswordStrength(password: string): { score: number; label: string; 
   return { score, label: 'Strong', color: '#22c55e' }
 }
 
-export function SignupForm({ onToggleMode }: SignupFormProps) {
+export function SignupForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -65,9 +61,10 @@ export function SignupForm({ onToggleMode }: SignupFormProps) {
       markUserSignedIn()
       router.push('/')
       router.refresh()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Signup failed:', err)
-      setError(err.message || 'Failed to sign up')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to sign up'
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }

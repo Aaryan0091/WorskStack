@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import { apiSuccess, apiError, withApiHandler, ApiError, isValidUrl } from '@/lib/api-response'
+import { apiSuccess, withApiHandler, ApiError } from '@/lib/api-response'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -13,7 +13,7 @@ function corsHeaders(response: NextResponse) {
   return response
 }
 
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return corsHeaders(new NextResponse(null, { status: 200 }))
 }
 
@@ -63,7 +63,7 @@ export const GET = withApiHandler(async (request: NextRequest) => {
     .select('bookmark_id')
     .eq('collection_id', collection.id)
 
-  const bookmarkIds = collectionBookmarks?.map((cb: any) => cb.bookmark_id) || []
+  const bookmarkIds = collectionBookmarks?.map((cb: { bookmark_id: string }) => cb.bookmark_id) || []
 
   let bookmarks = []
   if (bookmarkIds.length > 0) {
@@ -115,7 +115,7 @@ export const PUT = withApiHandler(async (request: NextRequest, { params }: { par
   }
 
   // Update sharing settings
-  const updateData: any = { is_public: is_public || false }
+  const updateData: { is_public: boolean; share_slug?: string | null } = { is_public: is_public || false }
 
   // Generate share_slug if making public and doesn't have one
   if (is_public && !collection.share_slug) {
@@ -144,6 +144,7 @@ export const PUT = withApiHandler(async (request: NextRequest, { params }: { par
 })
 
 // Generate unique share slug
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function generateShareSlug(name: string): string {
   const normalized = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
   const randomSuffix = Math.random().toString(36).substr(2, 9)

@@ -12,7 +12,7 @@ function corsHeaders(response: NextResponse) {
   return response
 }
 
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return corsHeaders(new NextResponse(null, { status: 200 }))
 }
 

@@ -5,11 +5,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!
 
-interface SupabaseError {
-  code?: string
-  message?: string
-}
-
 // Helper to add CORS headers
 function corsHeaders(response: NextResponse) {
   response.headers.set('Access-Control-Allow-Origin', '*')
@@ -41,11 +36,8 @@ async function getUserFromToken(authHeader: string | null) {
   return data.user
 }
 
-// POST - Record that a bookmark was opened
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// POST - Remove a collection from user's view
+export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization')
     const user = await getUserFromToken(authHeader)
@@ -55,55 +47,57 @@ export async function POST(
       return corsHeaders(response)
     }
 
-    const { id } = await params
+    const body = await request.json()
+    const { collectionId } = body
 
-    if (!id) {
-      const response = NextResponse.json({ error: 'Bookmark ID is required' }, { status: 400 })
+    if (!collectionId) {
+      const response = NextResponse.json({ error: 'Collection ID is required' }, { status: 400 })
       return corsHeaders(response)
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey)
 
-    // Verify the bookmark belongs to the user
-    const { data: bookmark } = await supabase
-      .from('bookmarks')
-      .select('id')
-      .eq('id', id)
-      .eq('user_id', user.id)
+    // Check if user owns this collection
+    const { data: collection } = await supabase
+      .from('collections')
+      .select('user_id')
+      .eq('id', collectionId)
       .single()
 
-    if (!bookmark) {
-      const response = NextResponse.json({ error: 'Bookmark not found' }, { status: 404 })
+    if (!collection) {
+      const response = NextResponse.json({ error: 'Collection not found' }, { status: 404 })
       return corsHeaders(response)
     }
 
-    // Update last_opened_at timestamp (but DON'T mark as read - user must manually mark as read)
-    let updateError: SupabaseError | null = null
-
-    try {
-      const result = await supabase
-        .from('bookmarks')
-        .update({
-          last_opened_at: new Date().toISOString()
+    if (collection.user_id === user.id) {
+      // Owner is removing the collection - add to removed_collections
+      // This way the collection still exists for others who have access
+      const { error: insertError } = await supabase
+        .from('removed_collections')
+        .insert({
+          collection_id: collectionId,
+          user_id: user.id
         })
-        .eq('id', id)
+
+      if (insertError) {
+        // If it's a duplicate (unique constraint), that's fine
+        if (insertError.code !== '23505') {
+          console.error('Error adding to removed_collections:', insertError)
+          const response = NextResponse.json({ error: 'Failed to remove collection' }, { status: 500 })
+          return corsHeaders(response)
+        }
+      }
+    } else {
+      // Non-owner - remove from shared_collections
+      const { error: deleteError } = await supabase
+        .from('shared_collections')
+        .delete()
+        .eq('collection_id', collectionId)
         .eq('user_id', user.id)
-        .select()
-        .single()
 
-      updateError = result.error
-    } catch (e) {
-      updateError = e as SupabaseError
-    }
-
-    if (updateError) {
-      // Check if it's because column doesn't exist
-      const errorCode = updateError.code
-      const errorMessage = updateError.message || String(updateError)
-      if (errorCode === '42703' || errorMessage.includes('column') || errorMessage.includes('last_opened_at')) {
-        // Column doesn't exist, but that's okay - the bookmark was still "opened"
-      } else {
-        const response = NextResponse.json({ error: errorMessage }, { status: 500 })
+      if (deleteError) {
+        console.error('Error removing from shared_collections:', deleteError)
+        const response = NextResponse.json({ error: 'Failed to remove collection' }, { status: 500 })
         return corsHeaders(response)
       }
     }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getBrowser, isChromiumBased, getBrowserName } from '@/lib/browser-detect'
+import { isChromiumBased, getBrowserName } from '@/lib/browser-detect'
 import { isExtensionInstalledViaContentScript, checkExtensionWithTimeout } from '@/lib/extension-detect'
 import { DashboardLayout } from '@/components/dashboard-layout'
 
@@ -154,7 +154,7 @@ export default function ExtensionPage() {
                   Extension Installed!
                 </h2>
                 <p className="mb-6" style={{ color: 'var(--text-secondary)' }}>
-                  You're all set! The WorkStack extension is ready to use.
+                  You&rsquo;re all set! The WorkStack extension is ready to use.
                 </p>
                 <button
                   onClick={() => router.push('/')}
@@ -258,10 +258,10 @@ export default function ExtensionPage() {
                     Find <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">workstack-extension.zip</code> in your Downloads folder and extract it.
                   </p>
                   <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    💡 <strong>Right-click</strong> the ZIP file → <strong>"Extract All"</strong> (Windows) or <strong>double-click</strong> to extract (Mac)
+                    💡 <strong>Right-click</strong> the ZIP file → <strong>&ldquo;Extract All&rdquo;</strong> (Windows) or <strong>double-click</strong> to extract (Mac)
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    📁 You'll get a <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">workstack-extension</code> folder - remember its location!
+                    📁 You&apos;ll get a <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">workstack-extension</code> folder - remember its location!
                   </p>
                 </div>
               </div>
@@ -276,7 +276,7 @@ export default function ExtensionPage() {
                     Open Extensions Page
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                    Click a card below to copy the URL, then paste it in your browser's address bar:
+                    Click a card below to copy the URL, then paste it in your browser&apos;s address bar:
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
@@ -315,7 +315,7 @@ export default function ExtensionPage() {
                     Enable Developer Mode
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                    Look for the "Developer mode" toggle in the top-right corner and turn it on.
+                    Look for the &ldquo;Developer mode&rdquo; toggle in the top-right corner and turn it on.
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                     💡 This allows you to load unpacked extensions from your computer
@@ -333,7 +333,7 @@ export default function ExtensionPage() {
                     Load the Extension
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                    Click "Load unpacked" and select the extracted extension folder.
+                    Click &ldquo;Load unpacked&rdquo; and select the extracted extension folder.
                   </p>
                   <div className="p-4 rounded-lg border-2 border-dashed flex items-center justify-center gap-3" style={{ borderColor: 'var(--border-color)' }}>
                     <svg className="w-8 h-8" style={{ color: 'var(--text-secondary)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">

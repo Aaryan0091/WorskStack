@@ -27,7 +27,7 @@ export function BookmarkMenu({
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  const openMenu = (e: React.MouseEvent) => {
+  const openMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation()
     e.preventDefault()
 
@@ -105,13 +105,12 @@ export function BookmarkMenu({
       {isOpen && createPortal(
         <div
           ref={menuRef}
-          className="fixed rounded-lg shadow-2xl border py-1 w-48"
+          className="fixed rounded-lg shadow-2xl border py-1 w-48 z-[1000]"
           style={{
             top: `${position.top}px`,
             left: `${position.left}px`,
             backgroundColor: 'var(--bg-primary)',
             borderColor: 'var(--border-color)',
-            zIndex: 99999,
           }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}

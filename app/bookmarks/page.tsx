@@ -22,7 +22,7 @@ export default function BookmarksPage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const [importing, setImporting] = useState(false)
 
-  const handleImport = async (data: any) => {
+  const handleImport = async (data: { bookmarks: Array<{ url: string; title?: string; description?: string; notes?: string; is_favorite?: boolean; is_read?: boolean }> }) => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
@@ -106,7 +106,7 @@ export default function BookmarksPage() {
         if (tagsRes.data) setTags(tagsRes.data)
 
         const tagMap: Record<string, Tag[]> = {}
-        bookmarkTagsRes.data?.forEach((bt: any) => {
+        bookmarkTagsRes.data?.forEach((bt: { bookmark_id: string; tags: Tag }) => {
           if (bt.tags) {
             if (!tagMap[bt.bookmark_id]) tagMap[bt.bookmark_id] = []
             tagMap[bt.bookmark_id].push(bt.tags)
@@ -121,7 +121,7 @@ export default function BookmarksPage() {
           if (storedBookmarks) {
             setBookmarks(storedBookmarks)
           }
-        } catch (e) {
+        } catch {
           setBookmarks([])
         }
         setIsGuest(true)

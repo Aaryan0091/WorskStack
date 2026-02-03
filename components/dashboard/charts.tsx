@@ -21,8 +21,6 @@ export const PieChart = memo(function PieChart({ data }: PieChartProps) {
   const center = size / 2
   const containerHeight = 160
 
-  let currentAngle = 0
-
   const getCoordinates = (angle: number) => {
     const radians = (angle - 90) * (Math.PI / 180)
     return {
@@ -31,45 +29,48 @@ export const PieChart = memo(function PieChart({ data }: PieChartProps) {
     }
   }
 
-  const slices = useMemo(() => data.map((item) => {
-    if (item.value === 0) return null
-    const percentage = (item.value / total) * 100
-    const angle = (item.value / total) * 360
+  const slices = useMemo(() => {
+    let currentAngle = 0
+    return data.map((item) => {
+      if (item.value === 0) return null
+      const percentage = (item.value / total) * 100
+      const angle = (item.value / total) * 360
 
-    const start = getCoordinates(currentAngle)
-    const end = getCoordinates(currentAngle + angle)
-    const largeArc = angle > 180 ? 1 : 0
+      const start = getCoordinates(currentAngle)
+      const end = getCoordinates(currentAngle + angle)
+      const largeArc = angle > 180 ? 1 : 0
 
-    currentAngle += angle
+      currentAngle += angle
 
-    // If it's a full circle (100%)
-    if (percentage === 100) {
+      // If it's a full circle (100%)
+      if (percentage === 100) {
+        return (
+          <circle
+            key={item.label}
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke={item.color}
+            strokeWidth={strokeWidth}
+            style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
+          />
+        )
+      }
+
       return (
-        <circle
+        <path
           key={item.label}
-          cx={center}
-          cy={center}
-          r={radius}
+          d={`M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`}
           fill="none"
           stroke={item.color}
           strokeWidth={strokeWidth}
+          strokeLinecap="round"
           style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
         />
       )
-    }
-
-    return (
-      <path
-        key={item.label}
-        d={`M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`}
-        fill="none"
-        stroke={item.color}
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
-      />
-    )
-  }), [data, total, radius, center, strokeWidth])
+    })
+  }, [data, total, radius, center, strokeWidth])
 
   return (
     <div className="flex items-center gap-5" style={{ height: containerHeight }}>

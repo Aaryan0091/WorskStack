@@ -975,52 +975,62 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       </Modal>
 
       {/* Permission Modal */}
-      <Modal isOpen={showPermissionModal} onClose={() => setShowPermissionModal(false)} title="">
-        <div className="space-y-5">
+      <Modal isOpen={showPermissionModal} onClose={() => setShowPermissionModal(false)} title="" size="lg"
+        footer={
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={() => setShowPermissionModal(false)}
+              className="flex-1 px-5 py-3 rounded-xl font-semibold text-sm transition-all active:scale-95 hover:scale-105"
+              style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmStartTracking}
+              className="flex-1 px-5 py-3 rounded-xl font-bold text-base transition-all active:scale-95 hover:scale-105 hover:shadow-lg flex items-center justify-center gap-2"
+              style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)', color: 'white', cursor: 'pointer' }}
+            >
+              <span>Allow Tracking</span>
+              <span className="text-lg">→</span>
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4 pb-4">
           {/* Header with icon */}
           <div className="text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-3" style={{
-              background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)'
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full mb-3" style={{
+              background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+              boxShadow: '0 8px 24px -8px rgba(139, 92, 246, 0.5)'
             }}>
-              <span className="text-3xl">🔒</span>
+              <span className="text-4xl">🔒</span>
             </div>
             <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Allow Activity Tracking?</h2>
             <p className="text-sm mt-2" style={{ color: 'var(--text-secondary)' }}>
-              WorkStack needs your permission to track your browsing
+              WorkStack needs permission to track your browsing activity
             </p>
           </div>
 
           {/* What we track */}
-          <div className="p-4 rounded-xl space-y-3" style={{ background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)' }}>
+          <div className="p-4 rounded-xl" style={{ background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm" style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)' }}>
                 <span style={{ color: '#22c55e' }}>✓</span>
               </div>
-              <span className="font-medium" style={{ color: 'var(--text-primary)' }}>What we'll do</span>
+              <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>What we'll do</span>
             </div>
-            <ul className="space-y-2 text-sm ml-10" style={{ color: 'var(--text-secondary)' }}>
-              <li className="flex items-start gap-2">
-                <span style={{ color: '#22c55e' }}>•</span>
-                <span>Track which tabs you visit and for how long</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span style={{ color: '#22c55e' }}>•</span>
-                <span>Help you understand your browsing habits</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span style={{ color: '#22c55e' }}>•</span>
-                <span>All data is stored privately in your account</span>
-              </li>
+            <ul className="space-y-1.5 text-xs ml-10" style={{ color: 'var(--text-secondary)' }}>
+              <li>• Track which tabs you visit and for how long</li>
+              <li>• Help you understand your browsing habits</li>
+              <li>• All data is stored privately in your account</li>
             </ul>
           </div>
 
           {/* Warning */}
           <div className="p-4 rounded-xl flex gap-3" style={{ backgroundColor: 'rgba(251, 146, 60, 0.1)', border: '1px solid rgba(251, 146, 60, 0.3)' }}>
-            <div className="flex-shrink-0">
-              <span className="text-2xl">⚠️</span>
-            </div>
+            <span className="text-2xl flex-shrink-0">⚠️</span>
             <div>
-              <p className="font-medium text-sm" style={{ color: '#ea580c' }}>Your activity will be tracked</p>
+              <p className="text-sm font-semibold" style={{ color: '#ea580c' }}>Your activity will be tracked</p>
               <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
                 The extension will track ALL websites you visit while tracking is enabled. You can stop tracking at any time.
               </p>
@@ -1029,35 +1039,16 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
 
           {/* Data info */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 rounded-lg text-center" style={{ backgroundColor: 'var(--bg-secondary)' }}>
-              <span className="text-lg">✅</span>
-              <p className="text-xs mt-1 font-medium" style={{ color: 'var(--text-primary)' }}>We Collect</p>
+            <div className="p-3 rounded-xl text-center" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+              <span className="text-xl">✅</span>
+              <p className="text-xs font-semibold mt-1.5" style={{ color: 'var(--text-primary)' }}>We Collect</p>
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>URL, title, domain, time</p>
             </div>
-            <div className="p-3 rounded-lg text-center" style={{ backgroundColor: 'var(--bg-secondary)' }}>
-              <span className="text-lg">🛡️</span>
-              <p className="text-xs mt-1 font-medium" style={{ color: 'var(--text-primary)' }}>We DON'T Collect</p>
+            <div className="p-3 rounded-xl text-center" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+              <span className="text-xl">🛡️</span>
+              <p className="text-xs font-semibold mt-1.5" style={{ color: 'var(--text-primary)' }}>We DON'T Collect</p>
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Passwords, forms, personal info</p>
             </div>
-          </div>
-
-          {/* Buttons */}
-          <div className="flex gap-3 pt-2">
-            <button
-              onClick={() => setShowPermissionModal(false)}
-              className="flex-1 px-4 py-3 rounded-lg font-medium transition-all active:scale-95"
-              style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer' }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={confirmStartTracking}
-              className="flex-1 px-4 py-3 rounded-lg font-medium transition-all active:scale-95 flex items-center justify-center gap-2"
-              style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)', color: 'white', cursor: 'pointer' }}
-            >
-              <span>Allow Tracking</span>
-              <span>→</span>
-            </button>
           </div>
         </div>
       </Modal>

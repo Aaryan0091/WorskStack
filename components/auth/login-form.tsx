@@ -3,17 +3,11 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import { markUserSignedIn } from '@/lib/guest-storage'
-
-interface LoginFormProps {
-  onToggleMode: () => void
-}
 
 const EXTENSION_ID = 'llahljdmcglglkcaadldnbpcpnkdinco'
 
-export function LoginForm({ onToggleMode }: LoginFormProps) {
+export function LoginForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -23,7 +17,7 @@ export function LoginForm({ onToggleMode }: LoginFormProps) {
 
   // Store auth token in extension after login
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: string, session: any) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: { access_token?: string } | null) => {
       // Store token on sign in and when token refreshes
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.access_token) {
         const apiBaseUrl = window.location.origin
@@ -45,7 +39,7 @@ export function LoginForm({ onToggleMode }: LoginFormProps) {
             action: 'storeAuthToken',
             authToken: session.access_token,
             apiBaseUrl
-          }, (response: any) => {
+          }, (response: unknown) => {
             if (responded) return
             responded = true
             clearTimeout(timeout)
@@ -87,9 +81,10 @@ export function LoginForm({ onToggleMode }: LoginFormProps) {
       // Use router.push instead of window.location
       router.push('/')
       router.refresh()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Login failed:', err)
-      setError(err.message || 'Failed to login')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to login'
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }

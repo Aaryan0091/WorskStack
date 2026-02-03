@@ -29,6 +29,7 @@ export default function TrackedActivityPage() {
 
   useEffect(() => {
     getCurrentUser()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export default function TrackedActivityPage() {
 
       return () => clearInterval(interval)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
 
   const getCurrentUser = async () => {
@@ -56,15 +58,16 @@ export default function TrackedActivityPage() {
   }
 
   const checkTrackingStatus = () => {
-    if (typeof window !== 'undefined' && (window as any).chrome) {
+    if (typeof window !== 'undefined' && (window as { chrome?: { runtime: { sendMessage: (extensionId: string, message: { action: string }, callback: (response: { isTracking: boolean }) => void) => void; lastError?: unknown } } }).chrome) {
       const extensionId = getExtensionId()
       if (!extensionId) return
 
-      (window as any).chrome.runtime.sendMessage(
+      const chromeWindow = window as { chrome?: { runtime: { sendMessage: (extensionId: string, message: { action: string }, callback: (response: { isTracking: boolean }) => void) => void; lastError?: unknown } } }
+      chromeWindow.chrome!.runtime.sendMessage(
         extensionId,
         { action: 'getStatus' },
-        (response: any) => {
-          if (response && !(window as any).chrome.runtime.lastError) {
+        (response: { isTracking: boolean }) => {
+          if (response && !chromeWindow.chrome!.runtime.lastError) {
             setIsTracking(response.isTracking)
           }
         }

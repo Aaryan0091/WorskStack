@@ -39,6 +39,18 @@ export interface Collection {
   description: string | null
   is_public: boolean
   share_slug: string | null
+  share_code: string | null
+  created_at: string
+}
+
+// Role of a user for a shared collection
+export type CollectionRole = 'owner' | 'editor' | 'viewer'
+
+export interface SharedCollection {
+  id: string
+  collection_id: string
+  user_id: string
+  role: CollectionRole
   created_at: string
 }
 

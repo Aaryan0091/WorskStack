@@ -9,14 +9,14 @@ import { Input } from '@/components/ui/input'
 import { Modal } from '@/components/ui/modal'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { UndoToast } from '@/components/ui/toast'
-import type { Tag } from '@/lib/types'
+import type { Tag, Bookmark } from '@/lib/types'
 
 export default function TagsPage() {
   const router = useRouter()
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState<'name' | 'count'>('count')
+  const [sortBy, setSortBy] = useState<'name' | 'count' | 'created'>('count')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
   // Modal states
@@ -46,6 +46,14 @@ export default function TagsPage() {
 
   // Keyboard navigation state
   const [focusedTagIndex, setFocusedTagIndex] = useState<number>(-1)
+
+  // Create tag modal state
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [createFormData, setCreateFormData] = useState({ name: '', color: '#8b5cf6' })
+  const [availableBookmarks, setAvailableBookmarks] = useState<Bookmark[]>([])
+  const [bookmarksLoading, setBookmarksLoading] = useState(false)
+  const [selectedBookmarkIds, setSelectedBookmarkIds] = useState<Set<string>>(new Set())
+  const [bookmarkSearchQuery, setBookmarkSearchQuery] = useState('')
 
   // Group elements by their row (using vertical position with tolerance)
   const groupElementsByRow = () => {
@@ -167,10 +175,7 @@ export default function TagsPage() {
     return bestMatch.index
   }
 
-  useEffect(() => {
-    fetchTags()
-  }, [])
-
+  // Declare fetchTags before useEffect
   const fetchTags = async () => {
     setLoading(true)
     const { data: { user } } = await supabase.auth.getUser()
@@ -192,7 +197,8 @@ export default function TagsPage() {
       // Extract counts from the aggregated data
       const counts: Record<string, number> = {}
       for (const tag of tagsData) {
-        counts[tag.id] = (tag as any).bookmark_tags?.[0]?.count || 0
+        const bookmarkTags = (tag as { bookmark_tags?: Array<{ count: number }> }).bookmark_tags
+        counts[tag.id] = bookmarkTags?.[0]?.count || 0
       }
       setTagCounts(counts)
     }
@@ -200,12 +206,22 @@ export default function TagsPage() {
     setLoading(false)
   }
 
+  // Call fetchTags on mount
+  useEffect(() => {
+    fetchTags()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Sort and filter tags
   const sortedTags = [...tags].sort((a, b) => {
     if (sortBy === 'name') {
       return sortOrder === 'asc'
         ? a.name.localeCompare(b.name)
         : b.name.localeCompare(a.name)
+    } else if (sortBy === 'created') {
+      return sortOrder === 'asc'
+        ? new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        : new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     } else {
       const aCount = tagCounts[a.id] || 0
       const bCount = tagCounts[b.id] || 0
@@ -232,7 +248,7 @@ export default function TagsPage() {
       }
 
       // Ignore if modals are open
-      if (editModalOpen || deleteModalOpen || mergeModalOpen || bulkDeleteModalOpen || bulkMergeModalOpen) {
+      if (editModalOpen || deleteModalOpen || mergeModalOpen || bulkDeleteModalOpen || bulkMergeModalOpen || createModalOpen) {
         return
       }
 
@@ -345,7 +361,8 @@ export default function TagsPage() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [filteredTags, focusedTagIndex, selectedTagIds, editModalOpen, deleteModalOpen, mergeModalOpen, bulkDeleteModalOpen, bulkMergeModalOpen, searchQuery, sortBy, sortOrder, selectMode])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredTags, focusedTagIndex, selectedTagIds, editModalOpen, deleteModalOpen, mergeModalOpen, bulkDeleteModalOpen, bulkMergeModalOpen, createModalOpen, searchQuery, sortBy, sortOrder, selectMode])
 
   const openEditModal = (tag: Tag) => {
     setSelectedTag(tag)
@@ -554,6 +571,87 @@ export default function TagsPage() {
     setBulkMergeTargetId('')
   }
 
+  // Fetch bookmarks for the create tag modal
+  const fetchBookmarks = async () => {
+    setBookmarksLoading(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      router.push('/login')
+      return
+    }
+
+    const { data: bookmarksData } = await supabase
+      .from('bookmarks')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('title', { ascending: true })
+
+    if (bookmarksData) {
+      setAvailableBookmarks(bookmarksData)
+    }
+    setBookmarksLoading(false)
+  }
+
+  // Open create tag modal
+  const openCreateModal = async () => {
+    await fetchBookmarks()
+    setCreateFormData({ name: '', color: '#8b5cf6' })
+    setSelectedBookmarkIds(new Set())
+    setBookmarkSearchQuery('')
+    setCreateModalOpen(true)
+  }
+
+  // Handle creating a new tag
+  const handleCreateTag = async () => {
+    if (!createFormData.name.trim()) return
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    // Create the tag
+    const { data: newTag, error } = await supabase
+      .from('tags')
+      .insert({
+        name: createFormData.name.trim(),
+        color: createFormData.color,
+        user_id: user.id,
+      })
+      .select()
+      .single()
+
+    if (error || !newTag) {
+      console.error('Failed to create tag:', error)
+      return
+    }
+
+    // Assign tag to selected bookmarks
+    if (selectedBookmarkIds.size > 0) {
+      const bookmarkTagEntries = Array.from(selectedBookmarkIds).map(bookmarkId => ({
+        tag_id: newTag.id,
+        bookmark_id: bookmarkId,
+      }))
+
+      await supabase.from('bookmark_tags').insert(bookmarkTagEntries)
+    }
+
+    await fetchTags()
+    setCreateModalOpen(false)
+    setCreateFormData({ name: '', color: '#8b5cf6' })
+    setSelectedBookmarkIds(new Set())
+    setBookmarkSearchQuery('')
+  }
+
+  // Toggle bookmark selection in create modal
+  const toggleBookmarkSelection = (bookmarkId: string) => {
+    const newSelection = new Set(selectedBookmarkIds)
+    if (newSelection.has(bookmarkId)) {
+      newSelection.delete(bookmarkId)
+    } else {
+      newSelection.add(bookmarkId)
+    }
+    setSelectedBookmarkIds(newSelection)
+  }
+
   const getTagColors = () => [
     '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16',
     '#22c55e', '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9',
@@ -610,26 +708,32 @@ export default function TagsPage() {
         >
           <option value="count-desc">Most Used</option>
           <option value="count-asc">Least Used</option>
+          <option value="created-desc">Recent</option>
           <option value="name-asc">Name (A-Z)</option>
           <option value="name-desc">Name (Z-A)</option>
         </select>
 
+        {/* Create New Tag Button */}
+        <button
+          onClick={openCreateModal}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border cursor-pointer bg-[var(--bg-secondary)] text-[var(--text-primary)] border-[var(--border-color)]"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          <span className="hidden sm:inline">New Tag</span>
+        </button>
+
         {/* Select Mode Toggle Button */}
         <button
           onClick={() => {
-            setSelectMode(!selectMode)
-            if (selectMode) {
+            const newMode = !selectMode
+            setSelectMode(newMode)
+            if (!newMode) {
               setSelectedTagIds(new Set())
             }
           }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${selectMode ? 'ring-2' : ''}`}
-          style={{
-            backgroundColor: selectMode ? '#3b82f6' : 'var(--bg-secondary)',
-            color: selectMode ? 'white' : 'var(--text-primary)',
-            borderColor: selectMode ? '#3b82f6' : 'var(--border-color)',
-            border: '1px solid',
-            cursor: 'pointer'
-          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border cursor-pointer ${selectMode ? 'ring-2 bg-blue-600 text-white border-blue-600' : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] border-[var(--border-color)]'}`}
           aria-label={selectMode ? 'Exit select mode' : 'Enter select mode'}
           aria-pressed={selectMode}
         >
@@ -640,7 +744,7 @@ export default function TagsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             )}
           </svg>
-          <span className="hidden sm:inline">{selectMode ? 'Selecting...' : 'Select Mode'}</span>
+          <span className="hidden sm:inline">{selectMode ? 'Selecting...' : 'Select'}</span>
         </button>
 
         {/* Keyboard shortcuts hint */}
@@ -728,7 +832,7 @@ export default function TagsPage() {
       ) : filteredTags.length === 0 ? (
         <Card>
           <CardContent className="p-12 text-center" style={{ color: 'var(--text-secondary)' }}>
-            No tags found matching "{searchQuery}"
+            No tags found matching &quot;{searchQuery}&quot;
           </CardContent>
         </Card>
       ) : (
@@ -905,7 +1009,7 @@ export default function TagsPage() {
             <span className="text-2xl">⚠️</span>
             <div>
               <p style={{ color: 'var(--text-primary)' }}>
-                Are you sure you want to delete <strong>"{selectedTag?.name}"</strong>?
+                Are you sure you want to delete <strong>&quot;{selectedTag?.name}&quot;</strong>?
               </p>
               <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
                 This will remove the tag from all bookmarks but won't delete the bookmarks themselves.
@@ -936,8 +1040,8 @@ export default function TagsPage() {
       <Modal isOpen={mergeModalOpen} onClose={() => setMergeModalOpen(false)} title="Merge Tag">
         <div className="space-y-4">
           <p style={{ color: 'var(--text-secondary)' }}>
-            Merge <strong>"{mergeSourceTag?.name}"</strong> into another tag.
-            All bookmarks tagged with "{mergeSourceTag?.name}" will also have the target tag.
+            Merge <strong>&quot;{mergeSourceTag?.name}&quot;</strong> into another tag.
+            All bookmarks tagged with &quot;{mergeSourceTag?.name}&quot; will also have the target tag.
           </p>
 
           <div>
@@ -987,7 +1091,7 @@ export default function TagsPage() {
                 Are you sure you want to delete <strong>{selectedTagIds.size} tags</strong>?
               </p>
               <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-                This will remove all selected tags from their bookmarks but won't delete the bookmarks themselves.
+                This will remove all selected tags from their bookmarks but won&apos;t delete the bookmarks themselves.
               </p>
             </div>
           </div>
@@ -1085,6 +1189,105 @@ export default function TagsPage() {
               style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', color: 'white' }}
             >
               Merge Tags
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Create New Tag Modal */}
+      <Modal isOpen={createModalOpen} onClose={() => setCreateModalOpen(false)} title="Create New Tag" size="lg">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Tag Name</label>
+            <Input
+              value={createFormData.name}
+              onChange={(e) => setCreateFormData({ ...createFormData, name: e.target.value })}
+              placeholder="Enter tag name"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Color</label>
+            <div className="flex flex-wrap gap-2">
+              {getTagColors().map(color => (
+                <button
+                  key={color}
+                  onClick={() => setCreateFormData({ ...createFormData, color })}
+                  className={createFormData.color === color ? 'w-10 h-10 rounded-full transition-transform hover:scale-110 ring-2 ring-offset-2 ring-gray-400' : 'w-10 h-10 rounded-full transition-transform hover:scale-110'}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+              Assign to Bookmarks <span className="text-sm font-normal text-gray-500">(optional)</span>
+            </label>
+            <div className="relative">
+              <Input
+                value={bookmarkSearchQuery}
+                onChange={(e) => setBookmarkSearchQuery(e.target.value)}
+                placeholder="Search bookmarks..."
+                className="pl-10"
+              />
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5" style={{ color: 'var(--text-secondary)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle cx={11} cy={11} r={8} strokeWidth={2} />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35" />
+              </svg>
+            </div>
+          </div>
+
+          <div className="max-h-60 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
+            {bookmarksLoading ? (
+              <div className="p-4 text-center text-sm text-gray-500">Loading bookmarks...</div>
+            ) : availableBookmarks.length === 0 ? (
+              <div className="p-4 text-center text-sm text-gray-500">No bookmarks found. Create some bookmarks first!</div>
+            ) : (
+              <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                {availableBookmarks
+                  .filter(b => b.title.toLowerCase().includes(bookmarkSearchQuery.toLowerCase()))
+                  .map(bookmark => (
+                    <div
+                      key={bookmark.id}
+                      onClick={() => toggleBookmarkSelection(bookmark.id)}
+                      className="flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedBookmarkIds.has(bookmark.id)}
+                        onChange={() => toggleBookmarkSelection(bookmark.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-4 h-4 rounded cursor-pointer"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                          {bookmark.title}
+                        </div>
+                        <div className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+                          {bookmark.url}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              onClick={() => setCreateModalOpen(false)}
+              variant="secondary"
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateTag}
+              className="flex-1"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', color: 'white' }}
+            >
+              Create Tag
             </Button>
           </div>
         </div>

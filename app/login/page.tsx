@@ -121,9 +121,9 @@ export default function LoginPage() {
             </div>
 
             {isLogin ? (
-              <LoginForm onToggleMode={() => setIsLogin(false)} />
+              <LoginForm />
             ) : (
-              <SignupForm onToggleMode={() => setIsLogin(true)} />
+              <SignupForm />
             )}
           </div>
 

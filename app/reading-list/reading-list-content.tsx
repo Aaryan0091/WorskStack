@@ -116,7 +116,7 @@ export function ReadingListContent() {
     try {
       const { data: { session } } = await supabase.auth.getSession()
       // Try different possible locations for the token
-      let token = session?.access_token || session?.session?.access_token
+      const token = session?.access_token || session?.session?.access_token
 
       if (!token) {
         setLoadingSemantic(false)
@@ -182,8 +182,8 @@ export function ReadingListContent() {
     })
     .catch(console.error)
 
-    // Remove from neverOpened state immediately for better UX
-    setNeverOpened(neverOpened.filter(b => b.id !== bookmark.id))
+    // Optimistically remove from neverOpened state immediately for better UX
+    setNeverOpened(prev => prev.filter(b => b.id !== bookmark.id))
   }
 
   const toggleRead = async (bookmark: Bookmark) => {
@@ -196,20 +196,20 @@ export function ReadingListContent() {
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedBookmarks)
         }
       } catch (e) { console.error('Error saving to localStorage:', e) }
-      setBookmarks(bookmarks.filter((b: Bookmark) => b.id !== bookmark.id))
-      setNeverOpened(neverOpened.filter((b: Bookmark) => b.id !== bookmark.id))
-      setSuggestions([{ ...bookmark, is_read: true }, ...suggestions])
+      setBookmarks(prev => prev.filter((b: Bookmark) => b.id !== bookmark.id))
+      setNeverOpened(prev => prev.filter((b: Bookmark) => b.id !== bookmark.id))
+      setSuggestions(prev => [{ ...bookmark, is_read: true }, ...prev])
       return
     }
     await supabase.from('bookmarks').update({ is_read: true }).eq('id', bookmark.id)
-    setBookmarks(bookmarks.filter(b => b.id !== bookmark.id))
-    setNeverOpened(neverOpened.filter(b => b.id !== bookmark.id))
+    setBookmarks(prev => prev.filter(b => b.id !== bookmark.id))
+    setNeverOpened(prev => prev.filter(b => b.id !== bookmark.id))
     // Add back to suggestions immediately
-    setSuggestions([{ ...bookmark, is_read: true }, ...suggestions])
+    setSuggestions(prev => [{ ...bookmark, is_read: true }, ...prev])
   }
 
-  // Recalculate never opened count (items > 1 week old)
-  const neverOpenedCount = bookmarks.filter(isOldNeverOpened).length
+  // Never opened count matches the neverOpened state length
+  const neverOpenedCount = neverOpened.length
 
   const addToReadingList = async (bookmark: Bookmark) => {
     // Add to reading list (set is_read = false)
@@ -221,16 +221,16 @@ export function ReadingListContent() {
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedBookmarks)
         }
       } catch (e) { console.error('Error saving to localStorage:', e) }
-      setBookmarks([{ ...bookmark, is_read: false }, ...bookmarks])
-      setSuggestions(suggestions.filter((b: Bookmark) => b.id !== bookmark.id))
-      setSemanticallyRelated(semanticallyRelated.filter((b: Bookmark) => b.id !== bookmark.id))
+      setBookmarks(prev => [{ ...bookmark, is_read: false }, ...prev])
+      setSuggestions(prev => prev.filter((b: Bookmark) => b.id !== bookmark.id))
+      setSemanticallyRelated(prev => prev.filter((b: Bookmark) => b.id !== bookmark.id))
       return
     }
     await supabase.from('bookmarks').update({ is_read: false }).eq('id', bookmark.id)
     // Update the bookmark object to reflect is_read: false before adding to state
-    setBookmarks([{ ...bookmark, is_read: false }, ...bookmarks])
-    setSuggestions(suggestions.filter((b: Bookmark) => b.id !== bookmark.id))
-    setSemanticallyRelated(semanticallyRelated.filter(b => b.id !== bookmark.id))
+    setBookmarks(prev => [{ ...bookmark, is_read: false }, ...prev])
+    setSuggestions(prev => prev.filter((b: Bookmark) => b.id !== bookmark.id))
+    setSemanticallyRelated(prev => prev.filter(b => b.id !== bookmark.id))
   }
 
   const updateNotes = async (bookmark: Bookmark, notes: string) => {
@@ -240,14 +240,14 @@ export function ReadingListContent() {
         if (storedBookmarks) {
           const updatedBookmarks = storedBookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, notes } : b)
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedBookmarks)
-          setBookmarks(bookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, notes } : b))
+          setBookmarks(prev => prev.map((b: Bookmark) => b.id === bookmark.id ? { ...b, notes } : b))
         }
       } catch (e) { console.error('Error saving to localStorage:', e) }
       setModalOpen(false)
       return
     }
     await supabase.from('bookmarks').update({ notes }).eq('id', bookmark.id)
-    setBookmarks(bookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, notes } : b))
+    setBookmarks(prev => prev.map((b: Bookmark) => b.id === bookmark.id ? { ...b, notes } : b))
     setModalOpen(false)
   }
 
@@ -523,7 +523,7 @@ export function ReadingListContent() {
           suggestions.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                No suggestions yet. As you read and mark items as complete, they'll appear here for you to rediscover.
+                No suggestions yet. As you read and mark items as complete, they&apos;ll appear here for you to rediscover.
               </CardContent>
             </Card>
           ) : (

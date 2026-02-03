@@ -16,7 +16,7 @@ function corsHeaders(response: NextResponse) {
 }
 
 // Handle OPTIONS preflight request
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return corsHeaders(new NextResponse(null, { status: 200 }))
 }
 
@@ -40,7 +40,7 @@ async function getUserFromToken(authHeader: string | null) {
 }
 
 // GET - Check AI feature status
-export async function GET(request: NextRequest) {
+export async function GET() {
   const isEnabled = !!GROQ_API_KEY
   return corsHeaders(
     NextResponse.json({

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { Card, CardContent } from '@/components/ui/card'
@@ -17,7 +17,6 @@ interface Props {
 }
 
 export function CollectionsClient({ collections: initialCollections, bookmarks: initialBookmarks }: Props) {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [collections, setCollections] = useState(initialCollections)
   const [bookmarks, setBookmarks] = useState(initialBookmarks)
@@ -50,6 +49,7 @@ export function CollectionsClient({ collections: initialCollections, bookmarks: 
       // Clear URL params
       window.history.replaceState({}, '', '/collections')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collections.length]) // Only run when collections are loaded
 
   const createCollection = async (e: React.FormEvent) => {

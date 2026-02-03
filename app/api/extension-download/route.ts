@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { Readable } from 'stream'
 
 const EXTENSION_DIR = '/Users/aaryangupta/Desktop/workstack-extension'
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const { readFile, readdir } = await import('fs/promises')
     const archiver = await import('archiver')
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     const archive = archiver.create('zip', { zlib: { level: 9 } })
 
     // Create a readable stream from the archive
-    const stream = Readable.from(archive as any)
+    const stream = Readable.from(archive as unknown as NodeJS.ReadableStream)
 
     // Collect chunks to create a Buffer
     const chunks: Uint8Array[] = []

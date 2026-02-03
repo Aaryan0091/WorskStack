@@ -30,10 +30,14 @@ export default function SmartSearchPage() {
   // Load collections and all bookmarks on mount
   useEffect(() => {
     const loadData = async () => {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
       const { data: collectionsData } = await supabase.from('collections').select('*').order('name')
       if (collectionsData) setCollections(collectionsData)
 
-      // Fetch ALL bookmarks with tags
+      // Fetch user's bookmarks with tags
       const { data: bookmarksData } = await supabase
         .from('bookmarks')
         .select(`
@@ -47,6 +51,7 @@ export default function SmartSearchPage() {
             )
           )
         `)
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
 
       if (bookmarksData) {

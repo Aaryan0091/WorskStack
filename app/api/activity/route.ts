@@ -5,6 +5,27 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!
 
+interface Activity {
+  user_id: string
+  url: string
+  title?: string
+  domain?: string
+  duration_seconds?: number
+  started_at?: string
+  ended_at?: string
+}
+
+interface TabActivity {
+  id: string
+  user_id: string
+  url: string
+  title?: string
+  domain?: string
+  duration_seconds?: number
+  started_at: string
+  ended_at: string
+}
+
 // POST - Insert activities (legacy, for batch sync)
 export async function POST(request: NextRequest) {
   try {
@@ -19,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     const { data, error } = await supabase
       .from('tab_activity')
-      .insert(activities.map((a: any) => ({
+      .insert(activities.map((a: Activity) => ({
         user_id: a.user_id,
         url: a.url,
         title: a.title,
@@ -96,11 +117,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    const totalTabs = data?.length || 0
-    const totalSeconds = data?.reduce((sum, item) => sum + (item.duration_seconds || 0), 0) || 0
+    const activities = data as TabActivity[] | null
+    const totalTabs = activities?.length || 0
+    const totalSeconds = activities?.reduce((sum, item) => sum + (item.duration_seconds || 0), 0) || 0
 
     const domainStats: Record<string, { count: number; seconds: number }> = {}
-    data?.forEach((item: any) => {
+    activities?.forEach((item: TabActivity) => {
       const domain = item.domain || 'other'
       if (!domainStats[domain]) {
         domainStats[domain] = { count: 0, seconds: 0 }
@@ -110,7 +132,7 @@ export async function GET(request: NextRequest) {
     })
 
     return NextResponse.json({
-      activities: data || [],
+      activities: activities || [],
       summary: {
         totalTabs,
         totalSeconds,

@@ -32,7 +32,7 @@ async function getSharedCollection(slug: string) {
     .select('bookmark_id')
     .eq('collection_id', collection.id)
 
-  const bookmarkIds = collectionBookmarks?.map((cb: any) => cb.bookmark_id) || []
+  const bookmarkIds = collectionBookmarks?.map((cb: { bookmark_id: string }) => cb.bookmark_id) || []
 
   let bookmarks: Bookmark[] = []
   if (bookmarkIds.length > 0) {

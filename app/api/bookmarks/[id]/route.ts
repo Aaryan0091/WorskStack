@@ -15,7 +15,7 @@ function corsHeaders(response: NextResponse) {
 }
 
 // Handle OPTIONS preflight request
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return corsHeaders(new NextResponse(null, { status: 200 }))
 }
 
@@ -121,7 +121,7 @@ export async function PATCH(
     const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey)
 
     // Build update object with only provided fields
-    const updateData: Record<string, any> = {}
+    const updateData: Record<string, string | boolean | null> = {}
     if (url !== undefined) updateData.url = url
     if (title !== undefined) updateData.title = title
     if (description !== undefined) updateData.description = description
