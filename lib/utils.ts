@@ -6,6 +6,31 @@ export function cn(...classes: (string | undefined | null | false)[]): string {
 }
 
 /**
+ * Generate a random UUID with fallback for browsers that don't support crypto.randomUUID()
+ * This is compatible with all browsers including older versions
+ */
+export function generateUUID(): string {
+  // Try modern API first
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+
+  // Fallback for older browsers
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
+/**
+ * Generate a short random ID (8 characters)
+ */
+export function generateShortId(): string {
+  return generateUUID().replace(/-/g, '').substring(0, 8)
+}
+
+/**
  * Format a date relative to now (e.g., "2 hours ago")
  */
 export function formatRelativeTime(date: string | Date): string {
@@ -46,7 +71,7 @@ export function truncate(text: string, maxLength: number): string {
 /**
  * Debounce a function
  */
-export function debounce<T extends (...args: any[]) => any>(
+export function debounce<T extends (...args: unknown[]) => unknown>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => void {
@@ -61,7 +86,7 @@ export function debounce<T extends (...args: any[]) => any>(
 /**
  * Throttle a function
  */
-export function throttle<T extends (...args: any[]) => any>(
+export function throttle<T extends (...args: unknown[]) => unknown>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => void {

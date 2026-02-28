@@ -88,7 +88,7 @@ export const GET = withApiHandler(async (request: NextRequest) => {
 })
 
 // PUT - Update collection sharing settings
-export const PUT = withApiHandler(async (request: NextRequest, { params }: { params: { id: string } }) => {
+export const PUT = withApiHandler(async (request: NextRequest, context?: { params: Promise<{ id: string }> }) => {
   const authHeader = request.headers.get('Authorization')
   const user = await getUserFromToken(authHeader)
 
@@ -96,7 +96,10 @@ export const PUT = withApiHandler(async (request: NextRequest, { params }: { par
     throw new ApiError('Unauthorized', 401, 'UNAUTHORIZED')
   }
 
-  const collectionId = params.id
+  // In Next.js 16, params is a Promise
+  const params = await context?.params
+  const collectionId = params?.id || ''
+
   const body = await request.json()
   const { is_public } = body
 

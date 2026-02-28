@@ -15,6 +15,7 @@ import {
   GUEST_KEYS,
   markGuestMode
 } from '@/lib/guest-storage'
+import { generateUUID, generateShortId } from '@/lib/utils'
 
 // Cache for faster loads
 const collectionsCache = {
@@ -33,7 +34,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
   const searchParams = useSearchParams()
   const [collections, setCollections] = useState<Collection[]>([])
   const [collectionBookmarks, setCollectionBookmarks] = useState<Record<string, Bookmark[]>>({})
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false) // Start with loading=false for instant render
   const [availableBookmarks, setAvailableBookmarks] = useState<Bookmark[]>([])
   const [isGuest, setIsGuest] = useState(false)
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'count'>('date')
@@ -102,8 +103,8 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
         setIsGuest(true)
         markGuestMode() // Mark user as guest mode
         try {
-          const storedCollections = guestStoreGet(GUEST_KEYS.COLLECTIONS)
-          const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+          const storedCollections = guestStoreGet<Collection[]>(GUEST_KEYS.COLLECTIONS)
+          const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
           if (storedCollections) {
             const parsedCollections = storedCollections
             setCollections(parsedCollections)
@@ -121,12 +122,12 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
           } else {
             // Create default collection for guest
             const defaultCollection: Collection = {
-              id: crypto.randomUUID(),
+              id: generateUUID(),
               user_id: '',
-              name: 'My Collection',
+              name: 'My Collection (default)',
               description: 'Your first collection',
               is_public: false,
-              share_slug: 'my-collection-' + crypto.randomUUID().substr(0, 8),
+              share_slug: 'my-collection-' + generateUUID().substr(0, 8),
               share_code: null,
               created_at: new Date().toISOString()
             }
@@ -185,7 +186,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       // Merge collections: owned + shared, then filter out removed
       const allCollections = [
         ...(ownedCollections || []),
-        ...(sharedCollectionsData?.map((sc: { collections: Collection }) => sc.collections).filter(Boolean) || [])
+        ...(sharedCollectionsData?.flatMap((sc: { collections: Collection[] }) => sc.collections || []).filter(Boolean) || [])
       ]
 
       // Remove duplicates (owned takes precedence) and sort, then filter out removed
@@ -202,10 +203,10 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
         const { data: newCollection } = await supabase
           .from('collections')
           .insert({
-            name: 'My Collection',
+            name: 'My Collection (default)',
             description: 'Your first collection',
             is_public: false,
-            share_slug: `my-collection-${crypto.randomUUID().substr(0, 8)}`,
+            share_slug: `my-collection-${generateUUID().substr(0, 8)}`,
             share_code: Math.random().toString(36).substring(2, 10),
             user_id: user.id,
           })
@@ -230,7 +231,10 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
           .eq('collection_id', collection.id)
           .limit(10) // Fetch more to account for removed ones
 
-        let bookmarks = data?.map((jb: any) => ({ ...jb.bookmarks, added_by: jb.added_by })).filter(Boolean) || []
+        let bookmarks = data?.flatMap((jb: { bookmarks: Bookmark | Bookmark[] | null; added_by: string }) => {
+          const bookmark = Array.isArray(jb.bookmarks) ? jb.bookmarks[0] : jb.bookmarks
+          return bookmark ? [{ ...bookmark, added_by: jb.added_by }] : []
+        }) || []
 
         // If not the owner, filter out bookmarks the user has removed from their view
         if (collection.user_id !== user.id) {
@@ -327,7 +331,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       // Merge collections: owned + shared, then filter out removed
       const allCollections = [
         ...(ownedCollections || []),
-        ...(sharedCollectionsData?.map((sc: { collections: Collection }) => sc.collections).filter(Boolean) || [])
+        ...(sharedCollectionsData?.flatMap((sc: { collections: Collection[] }) => sc.collections || []).filter(Boolean) || [])
       ]
 
       // Remove duplicates (owned takes precedence) and sort, then filter out removed
@@ -349,7 +353,10 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
           .eq('collection_id', collection.id)
           .limit(10) // Fetch more to account for removed ones
 
-        let bookmarks = data?.map((jb: any) => ({ ...jb.bookmarks, added_by: jb.added_by })).filter(Boolean) || []
+        let bookmarks = data?.flatMap((jb: { bookmarks: Bookmark | Bookmark[] | null; added_by: string }) => {
+          const bookmark = Array.isArray(jb.bookmarks) ? jb.bookmarks[0] : jb.bookmarks
+          return bookmark ? [{ ...bookmark, added_by: jb.added_by }] : []
+        }) || []
 
         // If not the owner, filter out bookmarks the user has removed from their view
         if (collection.user_id !== user.id) {
@@ -445,7 +452,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
     if (isGuest) {
       // Guest mode - save to localStorage
       const newCollection: Collection = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         name: formData.name,
         description: formData.description || null,
         user_id: '',
@@ -459,7 +466,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       setCollectionRoles(prev => ({ ...prev, [newCollection.id]: 'owner' }))
       try {
         guestStoreSet(GUEST_KEYS.COLLECTIONS, updatedCollections)
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
       setModalOpen(false)
       setFormData({ name: '', description: '', is_public: false })
       return
@@ -502,7 +509,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       setCollections(updatedCollections)
       try {
         guestStoreSet(GUEST_KEYS.COLLECTIONS, updatedCollections)
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
       setDeleteModalOpen(false)
       setCollectionToDelete(null)
       setActionLoading(false)
@@ -532,7 +539,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       setCollections(updatedCollections)
       try {
         guestStoreSet(GUEST_KEYS.COLLECTIONS, updatedCollections)
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
       return
     }
     // Show confirmation modal instead of directly toggling
@@ -585,7 +592,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       setCollections(updatedCollections)
       try {
         guestStoreSet(GUEST_KEYS.COLLECTIONS, updatedCollections)
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
       setEditModalOpen(false)
       setEditingCollection(null)
       setFormData({ name: '', description: '', is_public: false })
@@ -622,7 +629,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       // Guest mode - duplicate in localStorage
       const newCollection: Collection = {
         ...collection,
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         name: `${collection.name} (copy)`,
         share_slug: `${collection.name.toLowerCase().replace(/\s+/g, '-')}-copy-${Math.random().toString(36).substr(2, 9)}`,
         share_code: Math.random().toString(36).substring(2, 10),
@@ -633,7 +640,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       setCollectionRoles(prev => ({ ...prev, [newCollection.id]: 'owner' }))
       try {
         guestStoreSet(GUEST_KEYS.COLLECTIONS, updatedCollections)
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
       setActionLoading(false)
       return
     }
@@ -692,7 +699,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       setCollections(updatedCollections)
       try {
         guestStoreSet(GUEST_KEYS.COLLECTIONS, updatedCollections)
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
       setToast({ message: 'Collection removed', type: 'success' })
       setTimeout(() => setToast(null), 2000)
       return
@@ -700,7 +707,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token || session?.session?.access_token
+      const token = session?.access_token
 
       if (!token) {
         setToast({ message: 'You must be logged in', type: 'error' })
@@ -764,7 +771,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
       // Update guest bookmarks to point to target collection
       try {
-        const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (storedBookmarks) {
           const allBookmarks: Bookmark[] = storedBookmarks
           const updatedBookmarks = allBookmarks.map(b =>
@@ -772,14 +779,14 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
           )
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedBookmarks)
         }
-      } catch (e) { console.error('Error merging guest collections:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error merging guest collections:', e) }
 
       // Remove source collection
       const updatedCollections = collections.filter(c => c.id !== collectionToMerge.id)
       setCollections(updatedCollections)
       try {
         guestStoreSet(GUEST_KEYS.COLLECTIONS, updatedCollections)
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
 
       setMergeModalOpen(false)
       setCollectionToMerge(null)
@@ -834,7 +841,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
     if (isGuest) {
       // Update guest bookmarks in localStorage
       try {
-        const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (storedBookmarks) {
           const allBookmarks: Bookmark[] = storedBookmarks
           const updatedBookmarks = allBookmarks.map(b => bookmarkIds.has(b.id) ? { ...b, collection_id: collectionId } : b)
@@ -847,7 +854,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
             [collectionId]: [...addedBookmarks, ...(prev[collectionId] || [])].slice(0, 3)
           }))
         }
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
       setAddModalOpen(false)
       setSelectedCollection(null)
       setSelectedBookmarkIds(new Set())
@@ -886,7 +893,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
     const { data } = await supabase.from('bookmarks').select('*').order('title', { ascending: true })
     if (data) setAvailableBookmarks(data)
     // Update collection bookmarks cache
-    const addedBookmarks = data.filter((b: Bookmark) => bookmarkIds.has(b.id))
+    const addedBookmarks = data?.filter((b: Bookmark) => bookmarkIds.has(b.id)) || []
     setCollectionBookmarks(prev => ({
       ...prev,
       [collectionId]: [...addedBookmarks, ...(prev[collectionId] || [])].slice(0, 3)
@@ -903,7 +910,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
     if (isGuest) {
       // Guest mode - create bookmark in localStorage
       try {
-        const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         let allBookmarks: Bookmark[] = storedBookmarks || []
 
         // Check if bookmark already exists
@@ -915,7 +922,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
         } else {
           // Create new bookmark in this collection
           const newBookmark: Bookmark = {
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             user_id: '',
             url: pendingBookmark.url,
             title: pendingBookmark.title || new URL(pendingBookmark.url).hostname,
@@ -938,7 +945,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
         // Refresh collection bookmarks
         const collectionBookmarks = allBookmarks.filter(b => b.collection_id === collection.id).slice(0, 3)
         setCollectionBookmarks(prev => ({ ...prev, [collection.id]: collectionBookmarks }))
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
 
       setSelectCollectionModalOpen(false)
       setPendingBookmark(null)
@@ -1067,7 +1074,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token || session?.session?.access_token
+      const token = session?.access_token
 
       if (!token) {
         setToast({ message: 'You must be logged in', type: 'error' })
@@ -1125,7 +1132,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
         // Merge collections
         const allCollections = [
           ...(ownedCollections || []),
-          ...(sharedCollectionsData?.map((sc: { collections: Collection }) => sc.collections).filter(Boolean) || [])
+          ...(sharedCollectionsData?.flatMap((sc: { collections: Collection[] }) => sc.collections || []).filter(Boolean) || [])
         ]
 
         const seenIds = new Set<string>()
@@ -1145,7 +1152,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
             .eq('collection_id', collection.id)
             .limit(3)
 
-          const bookmarks = data?.map((jb: { bookmarks: Bookmark }) => jb.bookmarks).filter(Boolean) || []
+          const bookmarks = data?.flatMap((jb: { bookmarks: Bookmark[] }) => jb.bookmarks || []).filter(Boolean) || []
           return { collectionId: collection.id, bookmarks }
         })
 
@@ -1183,7 +1190,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
     if (isGuest) {
       // Guest mode - create bookmark in localStorage
       try {
-        const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         let allBookmarks: Bookmark[] = storedBookmarks || []
 
         // Check if bookmark already exists
@@ -1191,7 +1198,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
 
         if (!existingBookmark) {
           const newBookmark: Bookmark = {
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             user_id: '',
             url: newBookmarkUrl,
             title: newBookmarkTitle || new URL(newBookmarkUrl).hostname,
@@ -1216,7 +1223,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
           }))
           setAvailableBookmarks(allBookmarks)
         }
-      } catch (e) { console.error('Error saving to localStorage:', e) }
+      } catch (e) { if (process.env.NODE_ENV === 'development') console.error('Error saving to localStorage:', e) }
 
       // Reset form and close
       setNewBookmarkUrl('')
@@ -1236,7 +1243,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       .select('bookmark_id, bookmarks!inner(url)')
       .eq('collection_id', selectedCollection.id)
 
-    const existingUrlInCollection = existingInCollection?.find((cb: any) => cb.bookmarks?.url === newBookmarkUrl)
+    const existingUrlInCollection = existingInCollection?.find((cb: { bookmarks: { url: string }[] }) => cb.bookmarks?.[0]?.url === newBookmarkUrl)
     if (existingUrlInCollection) {
       // Show error message - URL already in collection
       setToast({ message: 'This URL is already in this collection', type: 'error' })
@@ -1419,7 +1426,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
             const bookmarks = collectionBookmarks[collection.id] || []
             const userRole = collectionRoles[collection.id] || 'owner' // Default to owner for own collections
             const canEdit = userRole === 'owner' || userRole === 'editor'
-            const isOwner = collection.user_id === (typeof window !== 'undefined' && (window as any).currentUser?.id) || userRole === 'owner'
+            const isOwner = collection.user_id === (typeof window !== 'undefined' && (window as typeof window & { currentUser?: { id: string } }).currentUser?.id) || userRole === 'owner'
 
             return (
               <Card
@@ -1612,7 +1619,7 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
                         // Fetch available bookmarks on-demand
                         if (isGuest) {
                           try {
-                            const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+                            const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
                             if (storedBookmarks) {
                               // For guests, filter out bookmarks already in this collection
                               const filtered = storedBookmarks.filter((b: Bookmark) => b.collection_id !== collection.id)
@@ -2249,9 +2256,9 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
               <>
                 You are about to make <strong>{pendingVisibilityChange?.collection?.name}</strong> <strong>private</strong>. This will:
                 <ul className="list-disc list-inside mt-2 ml-4" style={{ color: 'var(--text-secondary)' }}>
-                  <li>Remove it from all shared users' views (except the owner)</li>
+                  <li>Remove it from all shared users&apos; views (except the owner)</li>
                   <li>Only you will be able to see and manage it</li>
-                  <li>Existing shared users won't be able to access it anymore</li>
+                  <li>Existing shared users won&apos;t be able to access it anymore</li>
                 </ul>
               </>
             )}

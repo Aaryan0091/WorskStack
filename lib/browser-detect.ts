@@ -114,7 +114,7 @@ export function getBrowserName(): string {
 export function isIOS(): boolean {
   if (typeof window === 'undefined') return false
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && (navigator as any).maxTouchPoints > 1)
+    (navigator.platform === 'MacIntel' && typeof (navigator as typeof navigator & { maxTouchPoints?: number }).maxTouchPoints === 'number' && (navigator as typeof navigator & { maxTouchPoints?: number }).maxTouchPoints! > 1)
 }
 
 // Check if user is on Android

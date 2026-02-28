@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
+import type { Bookmark, Collection } from '@/lib/types'
 import {
   markUserSignedIn,
   guestStoreGet,
@@ -39,8 +40,8 @@ export function GuestSyncPrompt() {
       }
 
       // Check for guest data using localStorage
-      const guestBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
-      const guestCollections = guestStoreGet(GUEST_KEYS.COLLECTIONS)
+      const guestBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
+      const guestCollections = guestStoreGet<Collection[]>(GUEST_KEYS.COLLECTIONS)
 
       const bookmarks = guestBookmarks || []
       const collections = guestCollections || []
@@ -59,8 +60,8 @@ export function GuestSyncPrompt() {
     setSyncing(true)
 
     try {
-      const guestBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
-      const guestCollections = guestStoreGet(GUEST_KEYS.COLLECTIONS)
+      const guestBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
+      const guestCollections = guestStoreGet<Collection[]>(GUEST_KEYS.COLLECTIONS)
 
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token

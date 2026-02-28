@@ -126,7 +126,12 @@ export const POST = withApiHandler(async (request: NextRequest) => {
         'Authorization': authHeader || '',
       },
       body: JSON.stringify({ bookmark_id: data.id }),
-    }).catch((err) => console.error('Background auto-tag failed:', err))
+    }).catch((err) => {
+      // Silently fail for background task
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Background auto-tag failed:', err)
+      }
+    })
   }
 
   // If collection_id is provided, add to collection via junction table
@@ -136,7 +141,9 @@ export const POST = withApiHandler(async (request: NextRequest) => {
         .from('collection_bookmarks')
         .insert({ collection_id, bookmark_id: data.id })
     } catch (err) {
-      console.error('Failed to add to collection:', err)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Failed to add to collection:', err)
+      }
     }
   }
 

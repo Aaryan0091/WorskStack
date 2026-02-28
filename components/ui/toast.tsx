@@ -13,7 +13,7 @@ export function Toast({ message, type = 'info', duration = 3000, onClose }: Toas
   const [isVisible, setIsVisible] = useState(false)
 
   useEffect(() => {
-    setIsVisible(true)
+    requestAnimationFrame(() => setIsVisible(true))
     const timer = setTimeout(() => {
       setIsVisible(false)
       setTimeout(onClose, 300)
@@ -54,7 +54,7 @@ export function UndoToast({ message, duration = 5000, onClose, onUndo, onExpired
   const [timeLeft, setTimeLeft] = useState(duration / 1000)
 
   useEffect(() => {
-    setIsVisible(true)
+    requestAnimationFrame(() => setIsVisible(true))
     const timer = setTimeout(() => {
       setIsVisible(false)
       setTimeout(() => {
@@ -134,7 +134,7 @@ export function ConfirmDialog({ message, onConfirm, onCancel }: ConfirmDialogPro
   const [isVisible, setIsVisible] = useState(false)
 
   useEffect(() => {
-    setIsVisible(true)
+    requestAnimationFrame(() => setIsVisible(true))
   }, [])
 
   const handleConfirm = () => {

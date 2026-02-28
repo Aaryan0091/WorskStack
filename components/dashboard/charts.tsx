@@ -21,55 +21,74 @@ export const PieChart = memo(function PieChart({ data }: PieChartProps) {
   const center = size / 2
   const containerHeight = 160
 
-  const getCoordinates = (angle: number) => {
-    const radians = (angle - 90) * (Math.PI / 180)
-    return {
-      x: center + radius * Math.cos(radians),
-      y: center + radius * Math.sin(radians),
-    }
-  }
-
   const slices = useMemo(() => {
-    let currentAngle = 0
-    return data.map((item) => {
-      if (item.value === 0) return null
-      const percentage = (item.value / total) * 100
-      const angle = (item.value / total) * 360
-
-      const start = getCoordinates(currentAngle)
-      const end = getCoordinates(currentAngle + angle)
-      const largeArc = angle > 180 ? 1 : 0
-
-      currentAngle += angle
-
-      // If it's a full circle (100%)
-      if (percentage === 100) {
-        return (
-          <circle
-            key={item.label}
-            cx={center}
-            cy={center}
-            r={radius}
-            fill="none"
-            stroke={item.color}
-            strokeWidth={strokeWidth}
-            style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
-          />
-        )
+    // Helper function to calculate coordinates
+    const getCoordinates = (angle: number) => {
+      const radians = (angle - 90) * (Math.PI / 180)
+      return {
+        x: center + radius * Math.cos(radians),
+        y: center + radius * Math.sin(radians),
       }
+    }
 
-      return (
-        <path
-          key={item.label}
-          d={`M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`}
-          fill="none"
-          stroke={item.color}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
-        />
-      )
-    })
+    // Use reduce to accumulate angle without mutation
+    const { slices: resultSlices } = data.reduce<{
+      currentAngle: number
+      slices: (React.ReactElement | null)[]
+    }>(
+      (acc, item) => {
+        if (item.value === 0) return acc
+        const percentage = (item.value / total) * 100
+        const angle = (item.value / total) * 360
+
+        const start = getCoordinates(acc.currentAngle)
+        const end = getCoordinates(acc.currentAngle + angle)
+        const largeArc = angle > 180 ? 1 : 0
+
+        // If it's a full circle (100%)
+        if (percentage === 100) {
+          return {
+            currentAngle: acc.currentAngle + angle,
+            slices: [
+              ...acc.slices,
+              (
+                <circle
+                  key={item.label}
+                  cx={center}
+                  cy={center}
+                  r={radius}
+                  fill="none"
+                  stroke={item.color}
+                  strokeWidth={strokeWidth}
+                  style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
+                />
+              ),
+            ],
+          }
+        }
+
+        return {
+          currentAngle: acc.currentAngle + angle,
+          slices: [
+            ...acc.slices,
+            (
+              <path
+                key={item.label}
+                d={`M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`}
+                fill="none"
+                stroke={item.color}
+                strokeWidth={strokeWidth}
+                strokeLinecap="round"
+                style={{ filter: 'drop-shadow(0 0 6px ' + item.color + '50)' }}
+              />
+            ),
+          ],
+        }
+      },
+      { currentAngle: 0, slices: [] }
+    )
+
+    return resultSlices
   }, [data, total, radius, center, strokeWidth])
 
   return (

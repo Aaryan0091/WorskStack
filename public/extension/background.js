@@ -7,7 +7,7 @@ let isPaused = false
 let isAutomaticMode = true  // Track ALL websites by default
 let userId = null
 let authToken = null
-let apiBaseUrl = 'http://localhost:3000'
+let apiBaseUrl = null  // Will be set from storage or from website
 let hasSavedSession = false
 let trackingSessionId = null
 
@@ -236,8 +236,13 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
     startTracking(request.userId, request.authToken, request.apiBaseUrl, request.isAutomaticMode)
     sendResponse({ success: true })
   } else if (request.action === 'stopTracking') {
-    stopTracking()
-    sendResponse({ success: true })
+    stopTracking(() => {
+      // Callback after session is saved
+      chrome.storage.local.get(['savedSessionTabs'], (result) => {
+        sendResponse({ success: true, hasSavedSession: result.savedSessionTabs && result.savedSessionTabs.length > 0 })
+      })
+    })
+    return true
   } else if (request.action === 'pauseTracking') {
     pauseTracking()
     sendResponse({ success: true })
@@ -261,12 +266,17 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
     sendResponse({ success: true, isAutomaticMode })
   } else if (request.action === 'getStatus') {
     const tabs = getActiveTabsArray()
-    sendResponse({
-      isTracking,
-      isPaused,
-      hasSavedSession,
-      isAutomaticMode,
-      sessionTabs: tabs
+    // Always check storage for hasSavedSession to ensure accurate state
+    chrome.storage.local.get(['savedSessionTabs'], (result) => {
+      const savedSessionExists = result.savedSessionTabs && result.savedSessionTabs.length > 0
+      hasSavedSession = savedSessionExists
+      sendResponse({
+        isTracking,
+        isPaused,
+        hasSavedSession: savedSessionExists,
+        isAutomaticMode,
+        sessionTabs: tabs
+      })
     })
     return true
   } else if (request.action === 'ping') {
@@ -379,7 +389,7 @@ function startTracking(newUserId, newAuthToken, newApiBaseUrl) {
   })
 }
 
-function stopTracking() {
+function stopTracking(callback) {
   isTracking = false
   isPaused = false
 
@@ -422,6 +432,9 @@ function stopTracking() {
 
     chrome.storage.local.set({ isTracking: false, isPaused: false })
     chrome.action.setBadgeText({ text: '' })
+
+    // Call callback if provided
+    if (callback) callback()
   }, 500)
 }
 

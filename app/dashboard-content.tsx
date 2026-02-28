@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useMemo, useTransition, startTransition } from 'react'
+import { useEffect, useState, useRef, useMemo, useTransition, startTransition, lazy, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getExtensionId, isExtensionInstalledViaContentScript } from '@/lib/extension-detect'
@@ -9,7 +9,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { BookmarkMenu } from '@/components/bookmark-menu'
-import { ChartWithToggle, type ChartData } from '@/components/dashboard/charts'
 import type { Bookmark, Collection } from '@/lib/types'
 import {
   guestStoreGet,
@@ -18,12 +17,25 @@ import {
   markGuestMode
 } from '@/lib/guest-storage'
 
+// Lazy load heavy chart component for faster initial load
+const ChartWithToggle = lazy(() => import('@/components/dashboard/charts').then(m => ({ default: m.ChartWithToggle })))
+type ChartData = import('@/components/dashboard/charts').ChartData
+
 // Time-based greeting for personal touch
 function getGreeting(): string {
   const hour = new Date().getHours()
   if (hour < 12) return 'Good morning'
   if (hour < 17) return 'Good afternoon'
   return 'Good evening'
+}
+
+// Safely extract hostname from URL
+function safeGetHostname(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
 }
 
 export function DashboardContent({ initialBookmarks, initialCollections, initialStats }: { initialBookmarks: Bookmark[]; initialCollections: Collection[]; initialStats: { totalBookmarks: number; favoritesCount: number; unreadCount: number } }) {
@@ -34,10 +46,11 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   // Combined counts state for atomic updates - initialized from server-side data
   const [counts, setCounts] = useState(initialStats)
   const [isGuest, setIsGuest] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false) // Start with loading=false for instant render
   const [isTracking, setIsTracking] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [hasSavedSession, setHasSavedSession] = useState(false)
+  const [hasServerActivity, setHasServerActivity] = useState(false)
   const [extensionInstalled, setExtensionInstalled] = useState<boolean | null>(null)
   const [showExtensionModal, setShowExtensionModal] = useState(false)
   const [showPermissionModal, setShowPermissionModal] = useState(false)
@@ -68,49 +81,64 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // Check if browser is Chromium-based AND not mobile (supports Chrome extensions)
-  const isChromiumBrowser = () => {
-    if (typeof window === 'undefined') return false
-    const userAgent = navigator.userAgent
+  // Use state to avoid hydration mismatch - initialized to false for SSR consistency
+  const [isChromium, setIsChromium] = useState(false)
 
-    // Check if mobile device (iOS or Android)
-    const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(userAgent)
-    if (isMobile) return false
+  // Check if browser is Chromium-based after mount (client-only)
+  useEffect(() => {
+    const checkChromium = () => {
+      const userAgent = navigator.userAgent
 
-    // Check for Safari (non-Chromium)
-    const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent)
-    if (isSafari) return false
+      // Check if mobile device (iOS or Android)
+      const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(userAgent)
+      if (isMobile) {
+        setIsChromium(false)
+        return
+      }
 
-    // Check for Chrome, Chromium, Brave, Edge (Chromium), Opera, Vivaldi, etc.
-    // Exclude old Edge (EdgeHTML) which has "Edge/" not "Edg/"
-    return /Chrome|Chromium|Brave|Edg|OPR|Vivaldi/.test(userAgent) && !/Edge\/|EdgeHTML|MSIE|Trident/.test(userAgent)
-  }
+      // Check for Safari (non-Chromium)
+      const isSafari = /^((?!chrome|android).)*safari/i.test(userAgent)
+      if (isSafari) {
+        setIsChromium(false)
+        return
+      }
+
+      // Check for Chrome, Chromium, Brave, Edge (Chromium), Opera, Vivaldi, etc.
+      // Exclude old Edge (EdgeHTML) which has "Edge/" not "Edg/"
+      const result = /Chrome|Chromium|Brave|Edg|OPR|Vivaldi/.test(userAgent) && !/Edge\/|EdgeHTML|MSIE|Trident/.test(userAgent)
+      setIsChromium(result)
+    }
+
+    checkChromium()
+  }, [])
 
   // Fetch fresh data from server
   const fetchFreshData = async () => {
-    // Get user token for API call
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
-      // Guest mode - load from localStorage
-      markGuestMode()
-      try {
-        const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
-        const storedCollections = guestStoreGet(GUEST_KEYS.COLLECTIONS)
-        if (storedBookmarks) {
-          setBookmarks(storedBookmarks.slice(0, 5))
-          setCounts({
-            totalBookmarks: storedBookmarks.length,
-            favoritesCount: storedBookmarks.filter((b: Bookmark) => b.is_favorite).length,
-            unreadCount: storedBookmarks.filter((b: Bookmark) => !b.is_read).length,
-          })
+    try {
+      // Get user token for API call
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        // Guest mode - load from localStorage
+        markGuestMode()
+        try {
+          const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
+          const storedCollections = guestStoreGet<Collection[]>(GUEST_KEYS.COLLECTIONS)
+          if (storedBookmarks) {
+            setBookmarks(storedBookmarks.slice(0, 5))
+            setCounts({
+              totalBookmarks: storedBookmarks.length,
+              favoritesCount: storedBookmarks.filter((b: Bookmark) => b.is_favorite).length,
+              unreadCount: storedBookmarks.filter((b: Bookmark) => !b.is_read).length,
+            })
+          }
+          if (storedCollections) {
+            setCollections(storedCollections)
+          }
+        } catch (e) {
+          // Error loading guest data
         }
-        if (storedCollections) {
-          setCollections(storedCollections)
-        }
-      } catch (e) {
-        // Error loading guest data
+        return
       }
-      return
-    }
 
     const session = await supabase.auth.getSession()
     const token = session.data.session?.access_token
@@ -120,12 +148,21 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       headers: {
         'Authorization': `Bearer ${token}`,
       },
-    }).then(res => res.json())
+    }).then(async (res) => {
+      if (!res.ok) {
+        console.warn('Stats API returned non-OK status:', res.status)
+        return { total_bookmarks: 0, favorites_count: 0, unread_count: 0 }
+      }
+      return res.json()
+    }).catch((err) => {
+      console.warn('Failed to fetch stats:', err)
+      return { total_bookmarks: 0, favorites_count: 0, unread_count: 0 }
+    })
 
     // Fetch other data in parallel
     const [recentBookmarksRes, collectionsRes, statsData] = await Promise.all([
-      supabase.from('bookmarks').select('*').limit(5).order('created_at', { ascending: false }),
-      supabase.from('collections').select('*'),
+      supabase.from('bookmarks').select('*').eq('user_id', user.id).limit(5).order('created_at', { ascending: false }),
+      supabase.from('collections').select('*').eq('user_id', user.id),
       statsPromise,
     ])
 
@@ -138,18 +175,22 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
 
     if (recentBookmarksRes.data) setBookmarks(recentBookmarksRes.data)
     if (collectionsRes.data) setCollections(collectionsRes.data)
+    } catch (error) {
+      console.warn('Error fetching fresh data:', error)
+    }
   }
 
   // Check extension on mount (deferred to not block initial render)
   useEffect(() => {
 
     // Use a ref to store the handler for stable reference across HMR
-    const handlerRef = { current: null as ((event: any) => void) | null }
+    const handlerRef = { current: null as EventListener | null }
 
-    handlerRef.current = (event: any) => {
-      if (event.detail?.installed) {
+    handlerRef.current = (event: Event) => {
+      const customEvent = event as CustomEvent<{ installed: boolean; extensionId?: string }>
+      if (customEvent.detail?.installed) {
         setExtensionInstalled(true)
-        if (event.detail?.extensionId) {
+        if (customEvent.detail?.extensionId) {
           // Clear any existing interval before starting a new one
           if (checkIntervalRef.current) {
             clearInterval(checkIntervalRef.current)
@@ -189,6 +230,29 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
         setIsGuest(true)
       }
 
+      // Check if there's tracked activity on the server
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) {
+        try {
+          const response = await fetch('/api/activity/list', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({})
+          })
+          if (response.ok) {
+            const result = await response.json()
+            if (result.success && result.data && result.data.length > 0) {
+              setHasServerActivity(true)
+            }
+          }
+        } catch (e) {
+          // Silently ignore error
+        }
+      }
+
       // Hide loading state immediately - data will load in background
       setLoading(false)
 
@@ -225,7 +289,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     }, 50) // Small delay to avoid hydration issues
 
     // Listen for auth state changes and sync token to extension
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: any) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: { access_token?: string } | null) => {
       if (event === 'SIGNED_IN') {
         setIsGuest(false)
         fetchFreshData()
@@ -276,7 +340,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
 
   // Store auth token in extension
   const storeAuthTokenToExtension = (token: string) => {
-    const chrome = (window as any).chrome
+    const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, message: Record<string, unknown>, callback?: (r: unknown) => void) => void; lastError?: { message?: string } } } }).chrome
     if (!chrome?.runtime) return
 
     const extensionId = getExtensionId()
@@ -289,16 +353,16 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       }
     }, 500)
 
-    chrome.runtime.sendMessage(extensionId, {
+    chrome.runtime?.sendMessage?.(extensionId, {
       action: 'storeAuthToken',
       authToken: token,
       apiBaseUrl: window.location.origin
-    }, (response: any) => {
+    }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean } | undefined) => {
       if (responded) return
       responded = true
       if (tokenSyncTimeoutRef.current) clearTimeout(tokenSyncTimeoutRef.current)
 
-      if (chrome.runtime.lastError) {
+      if (chrome.runtime?.lastError) {
       } else {
       }
     })
@@ -306,8 +370,8 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
 
   const storeAuthTokenInExtension = async () => {
     const { data: { session } } = await supabase.auth.getSession()
-    if (session?.session?.access_token) {
-      storeAuthTokenToExtension(session.session.access_token)
+    if (session?.access_token) {
+      storeAuthTokenToExtension(session.access_token)
     }
   }
 
@@ -331,12 +395,13 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     }
 
     // Second check: Try messaging via chrome.runtime API
-    if (!(window as any).chrome?.runtime) {
+    const chromeWindow = window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: (r: { success?: boolean; isTracking?: boolean; isPaused?: boolean } | undefined) => void) => void; lastError?: { message?: string } } } }
+    if (!chromeWindow.chrome?.runtime) {
       setExtensionInstalled(false)
       return
     }
 
-    const chrome = (window as any).chrome
+    const chrome = chromeWindow.chrome
 
     // Try to get extension ID - this now uses known IDs as fallback
     const extensionId = getExtensionId()
@@ -356,12 +421,12 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       }
     }, 1000)
 
-    chrome.runtime.sendMessage(extensionId, { action: 'ping' }, (response: any) => {
+    chrome.runtime?.sendMessage?.(extensionId, { action: 'ping' }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean } | undefined) => {
       if (responded) return
       responded = true
       if (extensionCheckTimeoutRef.current) clearTimeout(extensionCheckTimeoutRef.current)
 
-      if (chrome.runtime.lastError) {
+      if (chrome.runtime?.lastError) {
         setExtensionInstalled(false)
       } else if (response?.success) {
         setExtensionInstalled(true)
@@ -376,19 +441,25 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   }
 
   const checkExtensionStatus = () => {
-    const chrome = (window as any).chrome
+    const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: (r: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; sessionTabs?: unknown[] } | undefined) => void) => void; lastError?: { message?: string } } } }).chrome
     if (!chrome?.runtime) return
 
     const extensionId = getExtensionId()
     if (!extensionId) return
 
-    chrome.runtime.sendMessage(extensionId, { action: 'getStatus' }, (response: any) => {
-      if (response && !chrome.runtime.lastError) {
-        setIsTracking(response.isTracking)
+    chrome.runtime?.sendMessage?.(extensionId, { action: 'getStatus' }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; hasSavedSession?: boolean; sessionTabs?: unknown[] } | undefined) => {
+      if (response && !chrome.runtime?.lastError) {
+        if (response.isTracking !== undefined) setIsTracking(response.isTracking)
         setIsPaused(response.isPaused || false)
-        setHasSavedSession(response.hasSavedSession || false)
+        const savedSession = response.hasSavedSession || response.savedSession || false
+        setHasSavedSession(savedSession)
         if (response.sessionTabs) {
-          setSessionTabs(response.sessionTabs)
+          setSessionTabs(response.sessionTabs as Array<{
+            url: string
+            title: string
+            domain: string
+            duration_seconds: number
+          }>)
         }
       }
     })
@@ -416,7 +487,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
 
     const { data: { session } } = await supabase.auth.getSession()
     const apiBaseUrl = window.location.origin
-    const chrome = (window as any).chrome
+    const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: (r: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; sessionTabs?: unknown[] } | undefined) => void) => void; lastError?: { message?: string } } } }).chrome
 
     const extensionId = getExtensionId()
     if (!extensionId) {
@@ -425,16 +496,18 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     }
 
     // First store the auth token, then start tracking
-    if (session?.session?.access_token) {
-      storeAuthTokenToExtension(session.session.access_token)
+    if (session?.access_token) {
+      storeAuthTokenToExtension(session.access_token)
     }
 
-    chrome.runtime.sendMessage(extensionId, {
+    if (!chrome?.runtime) return
+
+    chrome.runtime?.sendMessage?.(extensionId, {
       action: 'startTracking',
       userId: user.id,
       authToken: session?.access_token,
       apiBaseUrl
-    }, (response: any) => {
+    }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean } | undefined) => {
       if (response?.success) {
         setIsTracking(true)
         setIsPaused(false)
@@ -443,30 +516,33 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   }
 
   const stopTracking = () => {
-    const chrome = (window as any).chrome
+    const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: (r: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; sessionTabs?: unknown[] } | undefined) => void) => void; lastError?: { message?: string } } } }).chrome
     if (!chrome?.runtime) return
 
     const extensionId = getExtensionId()
     if (!extensionId) return
 
-    chrome.runtime.sendMessage(extensionId, { action: 'stopTracking' }, (response: any) => {
+    chrome.runtime?.sendMessage?.(extensionId, { action: 'stopTracking' }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; hasSavedSession?: boolean } | undefined) => {
       if (response?.success) {
         setIsTracking(false)
         setIsPaused(false)
         setSessionTabs([])
-        stopTrackingTimeoutRef.current = setTimeout(() => checkExtensionStatus(), 100)
+        // Set hasSavedSession from response if available
+        if (response.hasSavedSession !== undefined) {
+          setHasSavedSession(response.hasSavedSession)
+        }
       }
     })
   }
 
   const resumeActivity = () => {
-    const chrome = (window as any).chrome
+    const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: (r: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; sessionTabs?: unknown[] } | undefined) => void) => void; lastError?: { message?: string } } } }).chrome
     if (!chrome?.runtime) return
 
     const extensionId = getExtensionId()
     if (!extensionId) return
 
-    chrome.runtime.sendMessage(extensionId, { action: 'openSavedTabs' }, (response: any) => {
+    chrome.runtime?.sendMessage?.(extensionId, { action: 'openSavedTabs' }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean } | undefined) => {
       if (response?.success) {
         // Tabs opened but tracking not started
       }
@@ -516,13 +592,13 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   }
 
   const pauseTracking = () => {
-    const chrome = (window as any).chrome
+    const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: (r: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; sessionTabs?: unknown[] } | undefined) => void) => void; lastError?: { message?: string } } } }).chrome
     if (!chrome?.runtime) return
 
     const extensionId = getExtensionId()
     if (!extensionId) return
 
-    chrome.runtime.sendMessage(extensionId, { action: 'pauseTracking' }, (response: any) => {
+    chrome.runtime?.sendMessage?.(extensionId, { action: 'pauseTracking' }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean } | undefined) => {
       if (response?.success) {
         setIsPaused(true)
       }
@@ -530,13 +606,13 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   }
 
   const resumeTracking = () => {
-    const chrome = (window as any).chrome
+    const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: (r: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean; sessionTabs?: unknown[] } | undefined) => void) => void; lastError?: { message?: string } } } }).chrome
     if (!chrome?.runtime) return
 
     const extensionId = getExtensionId()
     if (!extensionId) return
 
-    chrome.runtime.sendMessage(extensionId, { action: 'resumeTracking' }, (response: any) => {
+    chrome.runtime?.sendMessage?.(extensionId, { action: 'resumeTracking' }, (response: { success?: boolean; isTracking?: boolean; isPaused?: boolean; savedSession?: boolean } | undefined) => {
       if (response?.success) {
         setIsPaused(false)
       }
@@ -550,7 +626,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       setBookmarks(updated)
       // Save to localStorage
       try {
-        const stored = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const stored = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (stored) {
           const updatedAll = stored.map((b: Bookmark) => b.id === bookmark.id ? { ...b, is_favorite: !b.is_favorite } : b)
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedAll)
@@ -572,7 +648,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       setBookmarks(updated)
       // Save to localStorage
       try {
-        const stored = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const stored = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (stored) {
           const updatedAll = stored.map((b: Bookmark) => b.id === bookmark.id ? { ...b, is_read: !b.is_read } : b)
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedAll)
@@ -593,7 +669,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       setBookmarks(bookmarks.filter(b => b.id !== id))
       // Save to localStorage
       try {
-        const stored = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const stored = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (stored) {
           const updatedAll = stored.filter((b: Bookmark) => b.id !== id)
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedAll)
@@ -697,7 +773,8 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
             )}
           </div>
           <div className="mt-4 md:mt-24 flex justify-center md:justify-end">
-            <ChartWithToggle
+            <Suspense fallback={<div className="w-full h-48 rounded-lg animate-pulse" style={{ backgroundColor: 'var(--bg-secondary)' }} />}>
+              <ChartWithToggle
               data={[
                 { label: 'Bookmarks', value: stats.total, color: 'var(--color-sky)' },
                 { label: 'To Read', value: stats.unread, color: 'var(--color-amber)' },
@@ -705,6 +782,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                 { label: 'Collections', value: stats.collections, color: 'var(--color-purple)' },
               ]}
             />
+            </Suspense>
           </div>
         </div>
 
@@ -720,15 +798,17 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                 >
                   <span>🎯 Track Activity</span>
                 </button>
-                {hasSavedSession && (
+                {(hasSavedSession || hasServerActivity) && (
                   <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                    <button
-                      onClick={resumeActivity}
-                      className="w-full sm:w-auto px-3 py-2.5 rounded-lg font-medium transition-all duration-75 active:scale-95 hover:scale-[1.02] flex items-center justify-center gap-2 text-sm"
-                      style={{ backgroundColor: '#3b82f6', color: 'white', cursor: 'pointer' }}
-                    >
-                      <span>📂 Resume Activity</span>
-                    </button>
+                    {hasSavedSession && (
+                      <button
+                        onClick={resumeActivity}
+                        className="w-full sm:w-auto px-3 py-2.5 rounded-lg font-medium transition-all duration-75 active:scale-95 hover:scale-[1.02] flex items-center justify-center gap-2 text-sm"
+                        style={{ backgroundColor: '#3b82f6', color: 'white', cursor: 'pointer' }}
+                      >
+                        <span>📂 Resume Activity</span>
+                      </button>
+                    )}
                     <button
                       onClick={showPreviousActivity}
                       className="w-full sm:w-auto px-3 py-2.5 rounded-lg font-medium transition-all duration-75 active:scale-95 hover:scale-[1.02] flex items-center justify-center gap-2 text-sm"
@@ -747,7 +827,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                     <span className="hidden sm:inline">Extension ready</span>
                     <span className="sm:hidden">Ready</span>
                   </span>
-                ) : isChromiumBrowser() ? (
+                ) : isChromium ? (
                   <button
                     onClick={() => router.push('/extension')}
                     className="w-full sm:w-auto px-3 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
@@ -965,7 +1045,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                     <CardContent className="p-4">
                       <div className="flex items-center gap-4">
                         <img
-                          src={`https://www.google.com/s2/favicons?domain=${new URL(bookmark.url).hostname}&sz=32`}
+                          src={`https://www.google.com/s2/favicons?domain=${safeGetHostname(bookmark.url)}&sz=32`}
                           className="w-8 h-8 rounded flex-shrink-0"
                           alt=""
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
@@ -1016,10 +1096,10 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
             <h3 className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Installation Steps:</h3>
             <ol className="list-decimal list-inside space-y-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
               <li>Open Chrome and go to <code className="bg-gray-200 px-1 rounded">chrome://extensions/</code></li>
-              <li>Enable "Developer mode" (top right toggle)</li>
-              <li>Click "Load unpacked" button</li>
+              <li>Enable &quot;Developer mode&quot; (top right toggle)</li>
+              <li>Click &quot;Load unpacked&quot; button</li>
               <li>Select the <code className="bg-gray-200 px-1 rounded">workstack-extension</code> folder</li>
-              <li>Come back and click "Track Activity" again</li>
+              <li>Come back and click &quot;Track Activity&quot; again</li>
             </ol>
           </div>
           <div className="p-4 rounded-lg" style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)' }}>
@@ -1032,7 +1112,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
             <Button variant="secondary" onClick={() => {
               setShowExtensionModal(false)
               checkExtensionInstalled()
-            }} className="flex-1">I've Installed It</Button>
+            }} className="flex-1">I&apos;ve Installed It</Button>
           </div>
         </div>
       </Modal>
@@ -1080,7 +1160,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
               <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs" style={{ backgroundColor: 'rgba(101, 163, 13, 0.2)' }}>
                 <span style={{ color: 'var(--color-olive)' }}>✓</span>
               </div>
-              <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>What we'll do</span>
+              <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>What we&apos;ll do</span>
             </div>
             <ul className="space-y-1 text-xs ml-8" style={{ color: 'var(--text-secondary)' }}>
               <li>• Track tabs you visit and time spent</li>
@@ -1109,7 +1189,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
             </div>
             <div className="p-2 rounded-xl text-center" style={{ backgroundColor: 'var(--bg-secondary)' }}>
               <span className="text-lg">🛡️</span>
-              <p className="text-xs font-semibold mt-1" style={{ color: 'var(--text-primary)' }}>We DON'T Collect</p>
+              <p className="text-xs font-semibold mt-1" style={{ color: 'var(--text-primary)' }}>We DON&apos;T Collect</p>
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Passwords, forms, personal info</p>
             </div>
           </div>

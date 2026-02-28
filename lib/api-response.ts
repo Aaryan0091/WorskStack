@@ -1,13 +1,22 @@
 import { NextResponse, NextRequest } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import type { User } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing required Supabase environment variables: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be set')
+}
+
+// TypeScript knows these are defined after the check above
+const SUPABASE_URL: string = supabaseUrl
+const SUPABASE_ANON_KEY: string = supabaseAnonKey
 
 /**
  * Standard API response types
  */
-export interface ApiSuccessResponse<T = any> {
+export interface ApiSuccessResponse<T = unknown> {
   success: true
   data: T
   message?: string
@@ -18,6 +27,13 @@ export interface ApiErrorResponse {
   error: string
   details?: string
   code?: string
+}
+
+/**
+ * Request body type
+ */
+export interface RequestBody {
+  [key: string]: unknown
 }
 
 /**
@@ -72,17 +88,30 @@ export const ErrorCodes = {
   RATE_LIMITED: 'RATE_LIMITED'
 } as const
 
+export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes]
+
+/**
+ * Supabase error codes
+ */
+interface SupabaseError {
+  code?: string
+  message?: string
+  details?: string
+}
+
 /**
  * Wrap API route handlers with try-catch and consistent error handling
  */
-export function withApiHandler(
-  handler: (req: NextRequest, context?: any) => Promise<NextResponse>
+export function withApiHandler<T extends NextRequest = NextRequest, C = unknown>(
+  handler: (req: T, context?: C) => Promise<NextResponse>
 ) {
-  return async (req: NextRequest, context?: any): Promise<NextResponse> => {
+  return async (req: T, context?: C): Promise<NextResponse> => {
     try {
       return await handler(req, context)
     } catch (error) {
-      console.error('API Error:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('API Error:', error)
+      }
 
       if (error instanceof ApiError) {
         return apiError(error.message, undefined, error.statusCode, error.code)
@@ -90,7 +119,7 @@ export function withApiHandler(
 
       // Handle Supabase errors
       if (error && typeof error === 'object' && 'code' in error) {
-        const supabaseError = error as any
+        const supabaseError = error as SupabaseError
         switch (supabaseError.code) {
           case 'PGRST116':
             return apiError('Resource not found', undefined, 404, ErrorCodes.NOT_FOUND)
@@ -117,9 +146,10 @@ export function withApiHandler(
 /**
  * Validate required fields in request body
  */
-export function validateRequired(body: any, fields: string[]): string | null {
+export function validateRequired(body: RequestBody, fields: string[]): string | null {
   for (const field of fields) {
-    if (!body[field] || (typeof body[field] === 'string' && !body[field].trim())) {
+    const value = body[field]
+    if (!value || (typeof value === 'string' && !(value as string).trim())) {
       return `Field '${field}' is required`
     }
   }
@@ -155,18 +185,20 @@ export function sanitizeInput(input: string): string {
  * Verify auth token and get user
  * Shared authentication helper for all API routes
  */
-export async function getUserFromToken(authHeader: string | null) {
+export async function getUserFromToken(authHeader: string | null): Promise<User | null> {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return null
   }
 
   const token = authHeader.substring(7)
-  const supabase = createClient(supabaseUrl, supabaseAnonKey)
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
   const { data, error } = await supabase.auth.getUser(token)
 
   if (error || !data.user) {
-    console.error('Auth error:', error?.message)
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Auth error:', error?.message)
+    }
     return null
   }
 
@@ -227,7 +259,7 @@ export function handleOptionsRequest(request?: NextRequest): NextResponse {
  * Get authenticated user from request headers
  * Convenience wrapper that extracts the Authorization header
  */
-export async function getAuthenticatedUser(request: NextRequest) {
+export async function getAuthenticatedUser(request: NextRequest): Promise<User | null> {
   const authHeader = request.headers.get('Authorization')
   return await getUserFromToken(authHeader)
 }
@@ -236,10 +268,11 @@ export async function getAuthenticatedUser(request: NextRequest) {
  * Require authentication - throws ApiError if user is not authenticated
  * Use this at the start of protected routes
  */
-export async function requireAuth(request: NextRequest) {
+export async function requireAuth(request: NextRequest): Promise<User> {
   const user = await getAuthenticatedUser(request)
   if (!user) {
     throw new ApiError('Unauthorized', 401, ErrorCodes.UNAUTHORIZED)
   }
   return user
 }
+

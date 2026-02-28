@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WorkStack Tab Tracker",
-  "version": "4.3.0",
+  "version": "5.0.0",
   "description": "Track your browsing activity and sync with WorkStack",
   "permissions": [
     "tabs",

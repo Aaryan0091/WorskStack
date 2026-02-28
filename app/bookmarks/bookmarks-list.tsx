@@ -14,6 +14,7 @@ import {
   guestStoreSet,
   GUEST_KEYS
 } from '@/lib/guest-storage'
+import { generateUUID } from '@/lib/utils'
 
 interface BookmarksListProps {
   initialBookmarks: Bookmark[]
@@ -216,7 +217,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
               setCollections(result.collections || [])
             }
           } catch (error) {
-            console.error('Failed to preload collections:', error)
+            if (process.env.NODE_ENV === 'development') {
+              console.error('Failed to preload collections:', error)
+            }
           }
         }
       }
@@ -234,14 +237,17 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
     const channel = supabase
       .channel('bookmarks-realtime')
       .on(
-        'postgres_changes',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
         {
           event: 'INSERT',
           schema: 'public',
           table: 'bookmarks'
         },
         async (payload: { new: Bookmark; old?: Bookmark }) => {
-          console.log('Realtime INSERT:', payload.new)
+          if (process.env.NODE_ENV === 'development') {
+            console.log('Realtime INSERT:', payload.new)
+          }
           const newBookmark = payload.new
 
           // Add bookmark to state
@@ -255,15 +261,19 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
                 .select('tag_id, tags(*)')
                 .eq('bookmark_id', newBookmark.id)
 
-              const fetchedTags = tagData?.map((bt: { tags: Tag }) => bt.tags).filter(Boolean) || []
-              console.log('Fetched tags for new bookmark:', fetchedTags)
+              const fetchedTags = tagData?.flatMap((bt: { tags: Tag[] }) => bt.tags || []).filter(Boolean) || []
+              if (process.env.NODE_ENV === 'development') {
+                console.log('Fetched tags for new bookmark:', fetchedTags)
+              }
 
               setBookmarkTags(prev => ({
                 ...prev,
                 [newBookmark.id]: fetchedTags
               }))
             } catch (error) {
-              console.error('Failed to fetch tags for new bookmark:', error)
+              if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to fetch tags for new bookmark:', error)
+              }
             }
           }, 500)
 
@@ -271,38 +281,47 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
         }
       )
       .on(
-        'postgres_changes',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
         {
           event: 'UPDATE',
           schema: 'public',
           table: 'bookmarks'
         },
         (payload: { new: Bookmark }) => {
-          console.log('Realtime UPDATE:', payload.new)
+          if (process.env.NODE_ENV === 'development') {
+            console.log('Realtime UPDATE:', payload.new)
+          }
           setBookmarks(prev => prev.map(b => b.id === payload.new.id ? payload.new : b))
         }
       )
       .on(
-        'postgres_changes',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
         {
           event: 'DELETE',
           schema: 'public',
           table: 'bookmarks'
         },
         (payload: { old: Bookmark }) => {
-          console.log('Realtime DELETE:', payload.old)
+          if (process.env.NODE_ENV === 'development') {
+            console.log('Realtime DELETE:', payload.old)
+          }
           setBookmarks(prev => prev.filter(b => b.id !== payload.old.id))
         }
       )
       .on(
-        'postgres_changes',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
         {
           event: 'INSERT',
           schema: 'public',
           table: 'bookmark_tags'
         },
         async (payload: { new: { bookmark_id: string } }) => {
-          console.log('Realtime bookmark_tag INSERT:', payload.new)
+          if (process.env.NODE_ENV === 'development') {
+            console.log('Realtime bookmark_tag INSERT:', payload.new)
+          }
           const bookmarkId = payload.new.bookmark_id
 
           // Fetch the tag details
@@ -311,7 +330,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
             .select('tag_id, tags(*)')
             .eq('bookmark_id', bookmarkId)
 
-          const fetchedTags = tagData?.map((bt: { tags: Tag }) => bt.tags).filter(Boolean) || []
+          const fetchedTags = tagData?.flatMap((bt: { tags: Tag[] }) => bt.tags || []).filter(Boolean) || []
 
           setBookmarkTags(prev => ({
             ...prev,
@@ -320,7 +339,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
         }
       )
       .subscribe((status: string) => {
-        console.log('Subscription status:', status)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Subscription status:', status)
+        }
       })
 
     return () => {
@@ -346,7 +367,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           .select('tag_id')
 
         if (usedTagsError) {
-          console.error('Failed to fetch used tag IDs:', usedTagsError)
+          if (process.env.NODE_ENV === 'development') {
+            console.error('Failed to fetch used tag IDs:', usedTagsError)
+          }
           return
         }
 
@@ -376,12 +399,18 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
           .in('id', unusedTagIds)
 
         if (deleteError) {
-          console.error('Failed to delete unused tags from database:', deleteError)
+          if (process.env.NODE_ENV === 'development') {
+            console.error('Failed to delete unused tags from database:', deleteError)
+          }
         } else {
-          console.log(`Cleaned up ${unusedTagIds.length} unused tag(s)`)
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Cleaned up ${unusedTagIds.length} unused tag(s)`)
+          }
         }
       } catch (error) {
-        console.error('Error during tag cleanup:', error)
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Error during tag cleanup:', error)
+        }
       }
     }
 
@@ -494,7 +523,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
                 setCollections(result.collections || [])
               }
             } catch (error) {
-              console.error('Failed to fetch collections:', error)
+              if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to fetch collections:', error)
+              }
             } finally {
               setCollectionsLoading(false)
             }
@@ -567,7 +598,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
             .eq('bookmark_id', bookmarkId)
         }
       } catch (error) {
-        console.error('Failed to update collections:', error)
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Failed to update collections:', error)
+        }
         setToast({ message: 'Failed to update collections', type: 'error' })
       }
     })()
@@ -617,7 +650,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
               .select('tag_id')
 
             if (usedTagsError) {
-              console.error('Failed to fetch used tag IDs:', usedTagsError)
+              if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to fetch used tag IDs:', usedTagsError)
+              }
             } else {
               const usedIds = new Set(usedTagIds?.map((bt: { tag_id: string }) => bt.tag_id) || [])
               const unusedTags = tags.filter(t => !usedIds.has(t.id))
@@ -637,14 +672,20 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
                   .in('id', unusedTags.map(t => t.id))
 
                 if (deleteError) {
-                  console.error('Failed to delete unused tags:', deleteError)
+                  if (process.env.NODE_ENV === 'development') {
+                    console.error('Failed to delete unused tags:', deleteError)
+                  }
                 } else {
-                  console.log(`Cleaned up ${unusedTags.length} unused tag(s) after deletion`)
+                  if (process.env.NODE_ENV === 'development') {
+                    console.log(`Cleaned up ${unusedTags.length} unused tag(s) after deletion`)
+                  }
                 }
               }
             }
           } catch (error) {
-            console.error('Error during tag cleanup after deletion:', error)
+            if (process.env.NODE_ENV === 'development') {
+              console.error('Error during tag cleanup after deletion:', error)
+            }
           }
         }
         setConfirmDialog(null)
@@ -728,7 +769,9 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
         setToast({ message: 'No tag suggestions generated', type: 'info' })
       }
     } catch (error) {
-      console.error('AI suggest error:', error)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('AI suggest error:', error)
+      }
       setToast({ message: 'Failed to get AI suggestions', type: 'error' })
     } finally {
       setIsSuggesting(false)
@@ -761,7 +804,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
     if (isGuest) {
       // Guest mode - save to localStorage
       const newBookmark: Bookmark = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         user_id: '',
         url: formData.url,
         title: formData.title || new URL(formData.url).hostname,
@@ -851,7 +894,7 @@ export function BookmarksList({ initialBookmarks, initialTags, initialBookmarkTa
     if (isGuest) {
       // Guest mode - save to localStorage
       const newBookmarks: Bookmark[] = newTabs.map(tab => ({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         user_id: '',
         url: tab.url,
         title: tab.title || new URL(tab.url).hostname,

@@ -5,24 +5,12 @@ declare global {
       runtime?: {
         sendMessage(
           extensionId: string,
-          message: any,
-          callback?: (response: any) => void
+          message: Record<string, unknown>,
+          callback?: (response: Record<string, unknown> | undefined) => void
         ): void
         lastError?: { message: string }
       }
     }
-  }
-}
-
-// TypeScript workaround for chrome.runtime in external messaging
-declare const chrome: {
-  runtime: {
-    sendMessage(
-      extensionId: string,
-      message: any,
-      callback?: (response: any) => void
-    ): void
-    lastError?: { message: string }
   }
 }
 

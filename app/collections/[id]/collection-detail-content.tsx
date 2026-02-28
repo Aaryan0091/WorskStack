@@ -9,6 +9,12 @@ import { Modal } from '@/components/ui/modal'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/input'
 import type { Bookmark, Collection } from '@/lib/types'
+import {
+  guestStoreGet,
+  guestStoreSet,
+  GUEST_KEYS,
+  markGuestMode
+} from '@/lib/guest-storage'
 
 interface Props {
   collectionId: string
@@ -24,7 +30,7 @@ export function CollectionDetailContent({ collectionId }: Props) {
   const [bookmarks, setBookmarks] = useState<CollectionBookmark[]>([])
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [userNames, setUserNames] = useState<Record<string, string>>({})
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false) // Start with loading=false for instant render
   const [actionLoading, setActionLoading] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
@@ -227,7 +233,7 @@ export function CollectionDetailContent({ collectionId }: Props) {
       .eq('collection_id', collectionId)
       .limit(1)
 
-    const existingUrlInCollection = existingBookmark?.find((cb: any) => cb.bookmarks?.url === newBookmarkUrl)
+    const existingUrlInCollection = existingBookmark?.find((cb: { bookmark_id: string; bookmarks: { url: string }[] }) => cb.bookmarks?.[0]?.url === newBookmarkUrl)
     if (existingUrlInCollection) {
       setActionLoading(false)
       setFormError('This URL is already in this collection')
@@ -288,13 +294,38 @@ export function CollectionDetailContent({ collectionId }: Props) {
   }
 
   const fetchData = async () => {
-    setLoading(true)
-
-    // Get current user
+    // Get current user first to check auth
     const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      setCurrentUserId(user.id)
+
+    // Guest mode handling - load from localStorage
+    if (!user) {
+      markGuestMode()
+      try {
+        const storedCollections = guestStoreGet<Collection[]>(GUEST_KEYS.COLLECTIONS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
+
+        if (storedCollections) {
+          const collection = storedCollections.find((c: Collection) => c.id === collectionId)
+          if (collection) {
+            setCollection(collection)
+            // Get bookmarks for this collection from guest storage
+            const collectionBookmarks = storedBookmarks?.filter((b: Bookmark) => b.collection_id === collectionId) || []
+            setBookmarks(collectionBookmarks)
+            setLoading(false)
+            return
+          }
+        }
+        // Collection not found - redirect to collections
+        router.push('/collections')
+      } catch (e) {
+        console.error('Error loading guest collection:', e)
+      }
+      setLoading(false)
+      return
     }
+
+    // Logged in user - fetch from Supabase
+    setCurrentUserId(user.id)
 
     // Fetch collection and bookmarks in parallel
     const [collectionRes, junctionRes] = await Promise.all([
@@ -311,10 +342,10 @@ export function CollectionDetailContent({ collectionId }: Props) {
     let newBookmarks: CollectionBookmark[] = []
     const orphanedIds: string[] = []
 
-    ;(junctionRes.data || []).forEach((jb: any) => {
-      if (jb.bookmarks) {
+    ;(junctionRes.data || []).forEach((jb: { bookmarks: CollectionBookmark[] | null; added_by: string; bookmark_id: string }) => {
+      if (jb.bookmarks && jb.bookmarks.length > 0) {
         newBookmarks.push({
-          ...jb.bookmarks,
+          ...jb.bookmarks[0],
           added_by: jb.added_by
         })
       } else {
@@ -338,7 +369,7 @@ export function CollectionDetailContent({ collectionId }: Props) {
         .from('removed_collection_bookmarks')
         .select('bookmark_id')
         .eq('collection_id', collectionId)
-        .eq('user_id', user.id)
+        .eq('user_id', user!.id)
 
       const removedIds = new Set(removedBookmarks?.map((rb: { bookmark_id: string }) => rb.bookmark_id) || [])
       newBookmarks = newBookmarks.filter((b: CollectionBookmark) => !removedIds.has(b.id))
@@ -359,7 +390,7 @@ export function CollectionDetailContent({ collectionId }: Props) {
 
       if (profiles) {
         const namesMap: Record<string, string> = {}
-        profiles.forEach((profile: any) => {
+        profiles.forEach((profile: { id: string; full_name?: string | null; email?: string | null }) => {
           namesMap[profile.id] = profile.full_name || profile.email?.split('@')[0] || 'Unknown User'
         })
         setUserNames(namesMap)
@@ -1452,9 +1483,9 @@ export function CollectionDetailContent({ collectionId }: Props) {
               <>
                 You are about to make this collection <strong>private</strong>. This will:
                 <ul className="list-disc list-inside mt-2 ml-4" style={{ color: 'var(--text-secondary)' }}>
-                  <li>Remove it from all shared users' views (except the owner)</li>
+                  <li>Remove it from all shared users&apos; views (except the owner)</li>
                   <li>Only you will be able to see and manage it</li>
-                  <li>Existing shared users won't be able to access it anymore</li>
+                  <li>Existing shared users won&apos;t be able to access it anymore</li>
                 </ul>
               </>
             )}

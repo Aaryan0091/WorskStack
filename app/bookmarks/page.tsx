@@ -106,10 +106,10 @@ export default function BookmarksPage() {
         if (tagsRes.data) setTags(tagsRes.data)
 
         const tagMap: Record<string, Tag[]> = {}
-        bookmarkTagsRes.data?.forEach((bt: { bookmark_id: string; tags: Tag }) => {
-          if (bt.tags) {
+        bookmarkTagsRes.data?.forEach((bt: { bookmark_id: string; tags: Tag[] }) => {
+          if (bt.tags && bt.tags.length > 0) {
             if (!tagMap[bt.bookmark_id]) tagMap[bt.bookmark_id] = []
-            tagMap[bt.bookmark_id].push(bt.tags)
+            tagMap[bt.bookmark_id].push(...bt.tags)
           }
         })
         setBookmarkTags(tagMap)
@@ -117,7 +117,7 @@ export default function BookmarksPage() {
         // Guest mode - load from localStorage
         markGuestMode()
         try {
-          const storedBookmarks = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+          const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
           if (storedBookmarks) {
             setBookmarks(storedBookmarks)
           }

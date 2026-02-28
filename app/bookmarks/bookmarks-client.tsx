@@ -127,11 +127,12 @@ export function BookmarksClient({ bookmarks: initialBookmarks, tags, bookmarkTag
       }
 
       const { data } = await supabase.from('bookmarks').insert({ ...bookmarkData, user_id: user.id }).select()
-      if (data) {
+      if (data && data[0]) {
         setBookmarks([data[0], ...bookmarks])
-      }
-      for (const tagId of formData.tag_ids) {
-        await supabase.from('bookmark_tags').insert({ bookmark_id: data[0].id, tag_id: tagId })
+        // Add tags to bookmark
+        for (const tagId of formData.tag_ids) {
+          await supabase.from('bookmark_tags').insert({ bookmark_id: data[0].id, tag_id: tagId })
+        }
       }
       closeModal()
     }

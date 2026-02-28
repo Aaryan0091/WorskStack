@@ -4,8 +4,29 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { markUserSignedIn } from '@/lib/guest-storage'
+import { GoogleSignInButton } from './google-signin-button'
+import { getExtensionId } from '@/lib/extension-detect'
 
-const EXTENSION_ID = 'llahljdmcglglkcaadldnbpcpnkdinco'
+// Type for Chrome runtime message response
+interface ChromeMessageResponse {
+  success?: boolean
+  [key: string]: unknown
+}
+
+// Extended Window interface for Chrome
+interface ChromeWindow extends Window {
+  chrome?: {
+    runtime?: {
+      sendMessage?: (
+        extensionId: string,
+        message: Record<string, unknown>,
+        callback?: (response: ChromeMessageResponse) => void
+      ) => void
+      lastError?: { message?: string }
+      id?: string
+    }
+  }
+}
 
 export function LoginForm() {
   const [email, setEmail] = useState('')
@@ -21,33 +42,29 @@ export function LoginForm() {
       // Store token on sign in and when token refreshes
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.access_token) {
         const apiBaseUrl = window.location.origin
-        console.log('Storing auth token in extension:', { event, apiBaseUrl })
+        const chromeWindow = window as ChromeWindow
 
-        const chrome = (window as any).chrome
-        if (chrome?.runtime) {
+        if (chromeWindow.chrome?.runtime) {
           let responded = false
           // Fast timeout to prevent hanging on non-Chrome browsers or when extension not installed
           const timeout = setTimeout(() => {
             if (!responded) {
               responded = true
-              console.log('Extension token sync: timeout (extension not installed)')
             }
           }, 500)
 
           // Send auth token to extension
-          chrome.runtime.sendMessage(EXTENSION_ID, {
+          chromeWindow.chrome.runtime.sendMessage?.(getExtensionId() || '', {
             action: 'storeAuthToken',
             authToken: session.access_token,
             apiBaseUrl
-          }, (response: unknown) => {
+          }, (response: ChromeMessageResponse) => {
             if (responded) return
             responded = true
             clearTimeout(timeout)
 
-            if (chrome.runtime.lastError) {
-              console.log('Extension not installed or not reachable:', chrome.runtime.lastError)
-            } else {
-              console.log('Auth token stored in extension:', response)
+            if (chromeWindow.chrome?.runtime?.lastError) {
+              // Extension not installed or not reachable - silently ignore
             }
           })
         }
@@ -63,26 +80,21 @@ export function LoginForm() {
     setLoading(true)
 
     try {
-      console.log('Attempting login with:', email)
-
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
       if (error) {
-        console.error('Login error:', error)
         throw error
       }
 
-      console.log('Login successful!', data)
       // Mark user as signed in so their guest data won't be cleared on close
       markUserSignedIn()
       // Use router.push instead of window.location
       router.push('/')
       router.refresh()
     } catch (err: unknown) {
-      console.error('Login failed:', err)
       const errorMessage = err instanceof Error ? err.message : 'Failed to login'
       setError(errorMessage)
     } finally {
@@ -91,7 +103,8 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={handleLogin} className="space-y-5" aria-label="Sign in form">
+    <div className="space-y-5">
+      <form onSubmit={handleLogin} className="space-y-5" aria-label="Sign in form">
       {/* Email input with icon */}
       <div className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" aria-hidden="true">
@@ -208,6 +221,21 @@ export function LoginForm() {
           </>
         )}
       </button>
-    </form>
+      </form>
+
+      {/* Divider */}
+      <div className="relative flex items-center justify-center">
+        <div className="absolute border-b" style={{ borderColor: 'var(--border-color)', width: '100%' }}></div>
+        <span className="relative px-4 text-sm" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>
+          Or continue with
+        </span>
+      </div>
+
+      {/* Google Sign In Button */}
+      <GoogleSignInButton
+        mode="signin"
+        onError={setError}
+      />
+    </div>
   )
 }

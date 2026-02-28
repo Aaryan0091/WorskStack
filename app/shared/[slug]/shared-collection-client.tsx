@@ -9,6 +9,7 @@ import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
 import type { Bookmark, Collection } from '@/lib/types'
 import { guestStoreSet, guestStoreGet, GUEST_KEYS, markGuestMode } from '@/lib/guest-storage'
+import { generateUUID, generateShortId } from '@/lib/utils'
 
 interface SharedCollectionClientProps {
   collection: Collection
@@ -48,12 +49,12 @@ export function SharedCollectionClient({ collection, bookmarks: initialBookmarks
 
         // Create a copy of the collection
         const newCollection: Collection = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           user_id: '',
           name: `${collection.name} (Copy)`,
           description: collection.description,
           is_public: false,
-          share_slug: `my-collection-${crypto.randomUUID().substr(0, 8)}`,
+          share_slug: `my-collection-${generateUUID().substr(0, 8)}`,
           share_code: Math.random().toString(36).substring(2, 10),
           created_at: new Date().toISOString()
         }
@@ -61,7 +62,7 @@ export function SharedCollectionClient({ collection, bookmarks: initialBookmarks
         // Create copies of all bookmarks
         const newBookmarks: Bookmark[] = initialBookmarks.map(bookmark => ({
           ...bookmark,
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           user_id: '',
           collection_id: newCollection.id,
           created_at: new Date().toISOString()
@@ -109,7 +110,7 @@ export function SharedCollectionClient({ collection, bookmarks: initialBookmarks
             name: `${collection.name} (Copy)`,
             description: collection.description,
             is_public: false,
-            share_slug: `my-collection-${crypto.randomUUID().substr(0, 8)}`
+            share_slug: `my-collection-${generateUUID().substr(0, 8)}`
           })
           .select()
           .single()

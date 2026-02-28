@@ -27,8 +27,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const tabUrl = activeTab?.url
   const tabTitle = activeTab?.title
 
-  console.log('Current tab:', tabUrl, tabTitle)
-
   // Get current status from background script with timeout
   let statusResponse = { isTracking: false, isPaused: false, hasSavedSession: false, currentTab: null, sessionTabs: [] }
 
@@ -37,9 +35,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.runtime.sendMessage({ action: 'getStatus' }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
     ])
-    console.log('Status response:', statusResponse)
   } catch (err) {
-    console.error('Failed to get status:', err)
+    // Failed to get status, will use storage fallback
     // Try to load from storage as fallback
     chrome.storage.local.get(['isTracking', 'isPaused'], (result) => {
       statusResponse.isTracking = result.isTracking || false
@@ -90,7 +87,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Show notification
   function showNotification(message, type = 'success') {
-    console.log('Showing notification:', message, type)
     notification.className = `notification ${type}`
     notificationIcon.textContent = type === 'success' ? '✓' : '✕'
     notificationText.textContent = message
@@ -131,14 +127,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   })
 
+  // Get API base URL from storage with smart fallback
+  function getApiBaseUrl(callback) {
+    chrome.storage.local.get(['apiBaseUrl'], (result) => {
+      if (result.apiBaseUrl) {
+        callback(result.apiBaseUrl)
+      } else {
+        // If no stored URL, extension may not be properly connected
+        // Show error to user
+        callback(null)
+      }
+    })
+  }
+
   // Dashboard button
   dashboardBtn.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.storage.local.apiBaseUrl || 'http://localhost:3000/tracked-activity' })
+    getApiBaseUrl((baseUrl) => {
+      if (baseUrl) {
+        chrome.tabs.create({ url: `${baseUrl}/tracked-activity` })
+      } else {
+        showNotification('Please visit WorkStack website to connect', 'error')
+      }
+    })
   })
 
   // Add to Collection button - show collection selector modal
   addToCollectionBtn.addEventListener('click', async () => {
-    console.log('Add to collection button clicked')
 
     if (!tabUrl) {
       showNotification('Cannot add this page', 'error')
@@ -154,14 +168,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       return
     }
 
-    chrome.storage.local.get(['apiBaseUrl', 'authToken'], async (result) => {
-      const baseUrl = result.apiBaseUrl || 'http://localhost:3000'
-      const token = result.authToken
-
-      if (!token) {
-        showNotification('Not logged in. Visit WorkStack to login.', 'error')
+    getApiBaseUrl(async (baseUrl) => {
+      if (!baseUrl) {
+        showNotification('Please connect extension from WorkStack website', 'error')
+        collectionModal.style.display = 'none'
         return
       }
+
+      chrome.storage.local.get(['authToken'], async (result) => {
+        const token = result.authToken
+
+        if (!token) {
+          showNotification('Not logged in. Visit WorkStack to login.', 'error')
+          collectionModal.style.display = 'none'
+          return
+        }
 
       // Show loading state in modal
       collectionModal.style.display = 'flex'
@@ -212,20 +233,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         })
 
       } catch (error) {
-        console.error('Collections fetch error:', error)
         collectionList.innerHTML = '<div class="collection-item-empty">Failed to load collections.<br>Try refreshing the page.</div>'
       }
+    })
     })
   })
 
   // Add to selected collection
   async function addToCollection(collectionId, collectionName) {
-    chrome.storage.local.get(['apiBaseUrl', 'authToken'], async (result) => {
-      const baseUrl = result.apiBaseUrl || 'http://localhost:3000'
-      const token = result.authToken
+    getApiBaseUrl(async (baseUrl) => {
+      if (!baseUrl) {
+        showNotification('Please connect extension from WorkStack website', 'error')
+        closeModal()
+        return
+      }
 
-      // Show loading state
-      collectionList.innerHTML = '<div class="collection-item-loading">Adding...</div>'
+      chrome.storage.local.get(['authToken'], async (result) => {
+        const token = result.authToken
+
+        // Show loading state
+        collectionList.innerHTML = '<div class="collection-item-loading">Adding...</div>'
 
       try {
         let title = tabTitle || tabUrl
@@ -266,10 +293,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           closeModal()
         }
       } catch (error) {
-        console.error('Add to collection error:', error)
         showNotification('Failed to connect. Is app running?', 'error')
         closeModal()
       }
+    })
     })
   }
 
@@ -282,8 +309,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Add as Bookmark button
   addBookmarkBtn.addEventListener('click', async () => {
-    console.log('Bookmark button clicked')
-
     if (!tabUrl) {
       showNotification('Cannot bookmark this page', 'error')
       return
@@ -303,58 +328,56 @@ document.addEventListener('DOMContentLoaded', async () => {
     addBookmarkBtn.innerHTML = 'Adding...'
     addBookmarkBtn.disabled = true
 
-    // Get API base URL and auth token from storage
-    chrome.storage.local.get(['apiBaseUrl', 'authToken'], async (result) => {
-      const baseUrl = result.apiBaseUrl || 'http://localhost:3000'
-      const token = result.authToken
-
-      console.log('Storage data:', { baseUrl, hasToken: !!token })
-
-      if (!token) {
-        showNotification('Not logged in. Visit WorkStack to login.', 'error')
+    // Get API base URL from storage
+    getApiBaseUrl(async (baseUrl) => {
+      if (!baseUrl) {
+        showNotification('Please connect extension from WorkStack website', 'error')
         addBookmarkBtn.innerHTML = originalText
         addBookmarkBtn.disabled = false
-        // Don't auto-open tab - user can manually visit the site
         return
       }
 
-      try {
-        // Get the hostname for the title if no title available
-        let title = tabTitle || tabUrl
-        if (!tabTitle) {
-          try {
-            const urlObj = new URL(tabUrl)
-            title = urlObj.hostname
-          } catch (e) {
-            title = tabUrl
+      chrome.storage.local.get(['authToken'], async (result) => {
+        const token = result.authToken
+
+        if (!token) {
+          showNotification('Not logged in. Visit WorkStack to login.', 'error')
+          addBookmarkBtn.innerHTML = originalText
+          addBookmarkBtn.disabled = false
+          return
+        }
+
+        try {
+          // Get the hostname for the title if no title available
+          let title = tabTitle || tabUrl
+          if (!tabTitle) {
+            try {
+              const urlObj = new URL(tabUrl)
+              title = urlObj.hostname
+            } catch (e) {
+              title = tabUrl
+            }
           }
-        }
 
-        const bookmarkData = {
-          url: tabUrl,
-          title: title,
-          description: null,
-          notes: null,
-          folder_id: null
-        }
+          const bookmarkData = {
+            url: tabUrl,
+            title: title,
+            description: null,
+            notes: null,
+            folder_id: null
+          }
 
-        console.log('Sending bookmark request to:', `${baseUrl}/api/bookmarks`)
-        console.log('Bookmark data:', bookmarkData)
-
-        // Make API call to create bookmark
-        const response = await fetch(`${baseUrl}/api/bookmarks`, {
-          method: 'POST',
-          headers: {
+          // Make API call to create bookmark
+          const response = await fetch(`${baseUrl}/api/bookmarks`, {
+            method: 'POST',
+            headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify(bookmarkData)
         })
 
-        console.log('Response status:', response.status)
-
         const data = await response.json()
-        console.log('Response data:', data)
 
         if (response.ok) {
           showNotification('Bookmark added!', 'success')
@@ -366,12 +389,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           showNotification(`Error: ${data.error || 'Failed'}`, 'error')
         }
       } catch (error) {
-        console.error('Bookmark error:', error)
         showNotification('Failed to connect. Is app running?', 'error')
       } finally {
         addBookmarkBtn.innerHTML = originalText
         addBookmarkBtn.disabled = false
       }
+      })
     })
   })
 })

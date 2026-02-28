@@ -120,7 +120,7 @@ export default function SmartSearchPage() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.session?.access_token
+      const token = session?.access_token
 
       const response = await fetch('/api/ai/search', {
         method: 'POST',

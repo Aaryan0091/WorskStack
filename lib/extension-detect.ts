@@ -9,6 +9,23 @@
  * 2. Ping message via externally_connectable (requires known extension ID)
  */
 
+// Extension message types
+export interface ExtensionMessage {
+  action: string
+  [key: string]: unknown
+}
+
+export interface ExtensionResponse {
+  success?: boolean
+  isTracking?: boolean
+  isPaused?: boolean
+  isAutomaticMode?: boolean
+  hasSavedSession?: boolean
+  sessionTabs?: unknown[]
+  version?: string
+  [key: string]: unknown
+}
+
 // Known extension IDs for Chrome Web Store and production
 const PRODUCTION_EXTENSION_ID = process.env.NEXT_PUBLIC_EXTENSION_ID || 'llahljdmcglglkcaadldnbpcpnkdinco'
 
@@ -16,13 +33,31 @@ let cachedExtensionId: string | null = null
 let extensionInstalledByPostMessage = false
 let hasRequestedExtensionId = false
 
+// Extend Window interface for WorkStack extension properties
+declare global {
+  interface Window {
+    workStackExtensionId?: string
+    workStackExtensionInstalled?: boolean
+    chrome?: {
+      runtime?: {
+        id?: string
+        sendMessage?: (
+          extensionId: string,
+          message: ExtensionMessage,
+          callback?: (response: ExtensionResponse) => void
+        ) => void
+        lastError?: { message?: string }
+      }
+    }
+  }
+}
+
 /**
  * Check if the extension is installed via content script marker or postMessage
  */
 export function isExtensionInstalledViaContentScript(): boolean {
   if (typeof window === 'undefined') return false
-  const win = window as any
-  return win.workStackExtensionInstalled === true || extensionInstalledByPostMessage
+  return window.workStackExtensionInstalled === true || extensionInstalledByPostMessage
 }
 
 /**
@@ -44,7 +79,7 @@ function requestExtensionIdFromContentScript(): Promise<string | null> {
       if (event.data?.type === 'workstack-extension-id-response') {
         clearTimeout(timeout)
         window.removeEventListener('message', handleMessage)
-        resolve(event.data.extensionId || null)
+        resolve((event.data.extensionId as string) || null)
       }
     }
 
@@ -69,7 +104,7 @@ function setupPostMessageListener(): void {
     // Handle extension announcement
     if (event.data?.type === 'workstack-extension-installed' && event.data.extensionId) {
       extensionInstalledByPostMessage = true
-      cachedExtensionId = event.data.extensionId
+      cachedExtensionId = event.data.extensionId as string
     }
   })
 
@@ -92,8 +127,7 @@ if (typeof window !== 'undefined') {
  */
 export function getExtensionIdFromContentScript(): string | null {
   if (typeof window === 'undefined') return null
-  const win = window as any
-  return win.workStackExtensionId || null
+  return window.workStackExtensionId || null
 }
 
 /**
@@ -130,14 +164,14 @@ export function getExtensionIdSync(): string | null {
  * Send a message to the extension
  * Returns a promise that resolves with the response or rejects on error
  */
-export function sendExtensionMessage(message: any): Promise<any> {
+export function sendExtensionMessage(message: ExtensionMessage): Promise<ExtensionResponse> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
       reject(new Error('Not in browser context'))
       return
     }
 
-    const chrome = (window as any).chrome
+    const chrome = window.chrome
     if (!chrome?.runtime?.sendMessage) {
       reject(new Error('Chrome runtime not available'))
       return
@@ -146,9 +180,9 @@ export function sendExtensionMessage(message: any): Promise<any> {
     // If we have a cached ID from postMessage, use it
     const extensionId = cachedExtensionId || PRODUCTION_EXTENSION_ID
 
-    chrome.runtime.sendMessage(extensionId, message, (response: any) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message))
+    chrome.runtime.sendMessage(extensionId, message, (response: ExtensionResponse) => {
+      if (chrome.runtime?.lastError) {
+        reject(new Error(chrome.runtime.lastError.message || 'Extension error'))
       } else {
         resolve(response)
       }

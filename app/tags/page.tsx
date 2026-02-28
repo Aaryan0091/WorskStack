@@ -459,7 +459,7 @@ export default function TagsPage() {
     // Update all bookmark_tags to point to the target tag
     const { data: existingRelations } = await supabase
       .from('bookmark_tags')
-      .select('id')
+      .select('id, bookmark_id')
       .eq('tag_id', mergeSourceTag.id)
 
     if (existingRelations) {
@@ -1012,7 +1012,7 @@ export default function TagsPage() {
                 Are you sure you want to delete <strong>&quot;{selectedTag?.name}&quot;</strong>?
               </p>
               <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-                This will remove the tag from all bookmarks but won't delete the bookmarks themselves.
+                This will remove the tag from all bookmarks but won&apos;t delete the bookmarks themselves.
               </p>
             </div>
           </div>

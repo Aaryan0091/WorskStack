@@ -28,7 +28,7 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }:
       // Small delay to trigger animation
       requestAnimationFrame(() => setIsAnimating(true))
     } else {
-      setIsAnimating(false)
+      requestAnimationFrame(() => setIsAnimating(false))
     }
 
     return () => {

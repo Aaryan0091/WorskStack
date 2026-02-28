@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
       .from('collections')
       .select('*')
       .eq('user_id', user.id)
-      .eq('name', 'Default Collection')
+      .eq('name', 'My Collection (default)')
       .single()
 
     if (existing) {
@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from('collections')
       .insert({
-        name: 'Default Collection',
+        name: 'My Collection (default)',
         description: 'Your default collection for quick saves',
         is_public: false,
         share_slug,
@@ -102,7 +102,9 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.json({ collection: data })
     return corsHeaders(response)
   } catch (error) {
-    console.error('API error:', error)
+    if (process.env.NODE_ENV === 'development') {
+      console.error('API error:', error)
+    }
     const response = NextResponse.json({ error: 'Internal server error' }, { status: 500 })
     return corsHeaders(response)
   }
@@ -134,7 +136,7 @@ export async function POST(request: NextRequest) {
       .from('collections')
       .select('*')
       .eq('user_id', user.id)
-      .eq('name', 'Default Collection')
+      .eq('name', 'My Collection (default)')
       .single()
 
     if (!collection.data) {
@@ -142,7 +144,7 @@ export async function POST(request: NextRequest) {
       const newCollection = await supabase
         .from('collections')
         .insert({
-          name: 'Default Collection',
+          name: 'My Collection (default)',
           description: 'Your default collection for quick saves',
           is_public: false,
           share_slug,
@@ -210,7 +212,9 @@ export async function POST(request: NextRequest) {
     })
     return corsHeaders(response)
   } catch (error) {
-    console.error('API error:', error)
+    if (process.env.NODE_ENV === 'development') {
+      console.error('API error:', error)
+    }
     const response = NextResponse.json({ error: 'Internal server error' }, { status: 500 })
     return corsHeaders(response)
   }

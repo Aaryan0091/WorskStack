@@ -1,27 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import type { Bookmark, Collection } from '@/lib/types'
+
+// Guest data types (from localStorage, may not have all fields)
+interface GuestBookmark {
+  id: string
+  user_id?: string
+  url: string
+  title: string
+  description?: string | null
+  notes?: string | null
+  is_read?: boolean
+  is_favorite?: boolean
+  collection_id?: string | null
+  [key: string]: unknown
+}
+
+interface GuestCollection {
+  id: string
+  user_id?: string
+  name: string
+  description?: string | null
+  is_public?: boolean
+  share_slug?: string | null
+  [key: string]: unknown
+}
 
 // Simple validation helpers
-function isValidGuestBookmark(item: any): boolean {
+function isValidGuestBookmark(item: unknown): item is GuestBookmark {
+  if (!item || typeof item !== 'object') return false
+
+  const bookmark = item as Record<string, unknown>
   return (
-    item &&
-    typeof item === 'object' &&
-    typeof item.url === 'string' &&
-    typeof item.title === 'string' &&
-    item.url.length > 0 &&
-    item.url.length <= 2048 &&
-    item.title.length > 0 &&
-    item.title.length <= 500
+    typeof bookmark.url === 'string' &&
+    typeof bookmark.title === 'string' &&
+    bookmark.url.length > 0 &&
+    bookmark.url.length <= 2048 &&
+    bookmark.title.length > 0 &&
+    bookmark.title.length <= 500
   )
 }
 
-function isValidGuestCollection(item: any): boolean {
+function isValidGuestCollection(item: unknown): item is GuestCollection {
+  if (!item || typeof item !== 'object') return false
+
+  const collection = item as Record<string, unknown>
   return (
-    item &&
-    typeof item === 'object' &&
-    typeof item.name === 'string' &&
-    item.name.length > 0 &&
-    item.name.length <= 200
+    typeof collection.name === 'string' &&
+    collection.name.length > 0 &&
+    collection.name.length <= 200
   )
 }
 
@@ -89,7 +116,7 @@ export async function POST(request: NextRequest) {
             user_id: user.id,
             name: guestCollection.name,
             description: guestCollection.description,
-            is_public: guestCollection.is_public,
+            is_public: guestCollection.is_public ?? false,
             share_slug: guestCollection.share_slug,
           })
           .select()
@@ -120,8 +147,8 @@ export async function POST(request: NextRequest) {
             title: guestBookmark.title,
             description: guestBookmark.description,
             notes: guestBookmark.notes,
-            is_read: guestBookmark.is_read,
-            is_favorite: guestBookmark.is_favorite,
+            is_read: guestBookmark.is_read ?? true,
+            is_favorite: guestBookmark.is_favorite ?? false,
             collection_id: collectionId,
           })
           .select()
@@ -141,7 +168,10 @@ export async function POST(request: NextRequest) {
       }
     })
   } catch (error) {
-    console.error('Sync error:', error)
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Sync error:', error)
+    }
     return NextResponse.json({ error: 'Sync failed' }, { status: 500 })
   }
 }
+

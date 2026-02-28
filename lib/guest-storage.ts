@@ -1,29 +1,72 @@
 'use client'
 
+import type { Bookmark, Collection, Tag } from './types'
+
 // Key to track if user signed in during this session
 const SIGNED_IN_KEY = 'workstack_signed_in_this_session'
 const GUEST_MODE_KEY = 'workstack_is_guest_mode'
 
+// Type for stored data (JSON serializable)
+type StoredValue = string | number | boolean | null | object | Array<unknown>
+
+// Sanitize input before storing to localStorage
+function sanitizeValue(value: unknown): StoredValue {
+  if (value === null || value === undefined) return null
+
+  // Primitive types are safe
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+
+  // Arrays and objects - recursively sanitize
+  if (Array.isArray(value)) {
+    return value.map((item: unknown) => sanitizeValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const sanitized: Record<string, StoredValue> = {}
+    for (const [key, val] of Object.entries(value)) {
+      // Only allow string keys (prevent prototype pollution)
+      if (typeof key === 'string' && Object.prototype.hasOwnProperty.call(value, key)) {
+        sanitized[key] = sanitizeValue(val)
+      }
+    }
+    return sanitized
+  }
+
+  return null
+}
+
 // Simple helpers for localStorage (persists on refresh, cleared on browser close)
 // We use localStorage for data persistence and clear it on beforeunload
-export function guestStoreGet(key: string): any {
+export function guestStoreGet<T = StoredValue>(key: string): T | null {
   if (typeof window === 'undefined') return null
   try {
     const item = localStorage.getItem(key)
-    return item ? JSON.parse(item) : null
-  } catch { return null }
+    if (!item) return null
+    return JSON.parse(item) as T
+  } catch {
+    return null
+  }
 }
 
-export function guestStoreSet(key: string, value: any): void {
+export function guestStoreSet(key: string, value: StoredValue): void {
   if (typeof window === 'undefined') return
   try {
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch (e) { console.error('localStorage error:', e) }
+    const sanitized = sanitizeValue(value)
+    localStorage.setItem(key, JSON.stringify(sanitized))
+  } catch {
+    // Silently fail if localStorage is full or unavailable
+  }
 }
 
 export function guestStoreRemove(key: string): void {
   if (typeof window === 'undefined') return
-  localStorage.removeItem(key)
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Silently fail
+  }
 }
 
 // Keys for localStorage
@@ -33,7 +76,7 @@ export const GUEST_KEYS = {
   TAGS: 'workstack_guest_tags',
   SIGNED_IN: SIGNED_IN_KEY,
   GUEST_MODE: GUEST_MODE_KEY
-}
+} as const
 
 /**
  * Mark that the user has signed in
@@ -45,7 +88,9 @@ export function markUserSignedIn(): void {
     localStorage.setItem(SIGNED_IN_KEY, 'true')
     // Clear guest mode flag since user is now signed in
     localStorage.removeItem(GUEST_MODE_KEY)
-  } catch (e) { console.error('localStorage error:', e) }
+  } catch {
+    // Silently fail
+  }
 }
 
 /**
@@ -55,7 +100,9 @@ export function markGuestMode(): void {
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(GUEST_MODE_KEY, 'true')
-  } catch (e) { console.error('localStorage error:', e) }
+  } catch {
+    // Silently fail
+  }
 }
 
 /**
@@ -63,7 +110,11 @@ export function markGuestMode(): void {
  */
 export function hasUserSignedIn(): boolean {
   if (typeof window === 'undefined') return false
-  return localStorage.getItem(SIGNED_IN_KEY) === 'true'
+  try {
+    return localStorage.getItem(SIGNED_IN_KEY) === 'true'
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -71,7 +122,11 @@ export function hasUserSignedIn(): boolean {
  */
 export function isGuestMode(): boolean {
   if (typeof window === 'undefined') return false
-  return localStorage.getItem(GUEST_MODE_KEY) === 'true' && !hasUserSignedIn()
+  try {
+    return localStorage.getItem(GUEST_MODE_KEY) === 'true' && !hasUserSignedIn()
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -84,32 +139,41 @@ export function clearGuestData(): void {
     Object.values(GUEST_KEYS).forEach(key => {
       localStorage.removeItem(key)
     })
-  } catch (e) { console.error('Error clearing guest data:', e) }
+  } catch {
+    // Silently fail
+  }
 }
 
 /**
  * Get all guest data for syncing
  */
 export function getAllGuestData(): {
-  bookmarks: any[] | null
-  collections: any[] | null
-  tags: any[] | null
+  bookmarks: Bookmark[] | null
+  collections: Collection[] | null
+  tags: Tag[] | null
 } {
   return {
-    bookmarks: guestStoreGet(GUEST_KEYS.BOOKMARKS),
-    collections: guestStoreGet(GUEST_KEYS.COLLECTIONS),
-    tags: guestStoreGet(GUEST_KEYS.TAGS)
+    bookmarks: guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS),
+    collections: guestStoreGet<Collection[]>(GUEST_KEYS.COLLECTIONS),
+    tags: guestStoreGet<Tag[]>(GUEST_KEYS.TAGS)
   }
 }
+
+// Track cleanup function to avoid multiple listeners
+let cleanupFn: (() => void) | null = null
 
 /**
  * Setup cleanup listener for guest mode
  * Clears data when browser is closed (beforeunload) if user hasn't signed in
+ * Only sets up the listener once
  */
 export function setupGuestCleanup(): () => void {
   if (typeof window === 'undefined') return () => {}
 
-  const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+  // Return existing cleanup if already set up
+  if (cleanupFn) return cleanupFn
+
+  const handleBeforeUnload = () => {
     // Only clear if user is still in guest mode (never signed in)
     if (!hasUserSignedIn() && isGuestMode()) {
       clearGuestData()
@@ -119,9 +183,22 @@ export function setupGuestCleanup(): () => void {
   // Listen for page unload (browser close)
   window.addEventListener('beforeunload', handleBeforeUnload)
 
-  // Return cleanup function
-  return () => {
+  // Create cleanup function
+  cleanupFn = () => {
     window.removeEventListener('beforeunload', handleBeforeUnload)
+    cleanupFn = null
+  }
+
+  return cleanupFn
+}
+
+/**
+ * Teardown cleanup listener (call when component unmounts)
+ */
+export function teardownGuestCleanup(): void {
+  if (cleanupFn) {
+    cleanupFn()
+    cleanupFn = null
   }
 }
 
@@ -130,8 +207,12 @@ export function setupGuestCleanup(): () => void {
  */
 export function hasGuestData(): boolean {
   if (typeof window === 'undefined') return false
-  return Object.values(GUEST_KEYS).some(key => {
-    if (key === SIGNED_IN_KEY || key === GUEST_MODE_KEY) return false
-    return localStorage.getItem(key) !== null
-  })
+  try {
+    return Object.values(GUEST_KEYS).some(key => {
+      if (key === SIGNED_IN_KEY || key === GUEST_MODE_KEY) return false
+      return localStorage.getItem(key) !== null
+    })
+  } catch {
+    return false
+  }
 }

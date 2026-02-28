@@ -1,12 +1,19 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing required Supabase environment variables')
+}
+
+const SUPABASE_URL: string = supabaseUrl
+const SUPABASE_ANON_KEY: string = supabaseAnonKey
+const SUPABASE_SERVICE_KEY = supabaseServiceKey || supabaseAnonKey
 
 interface Activity {
-  user_id: string
   url: string
   title?: string
   domain?: string
@@ -26,9 +33,33 @@ interface TabActivity {
   ended_at: string
 }
 
+// Helper: Get authenticated user from request
+async function getAuthenticatedUser(request: NextRequest) {
+  const authHeader = request.headers.get('Authorization')
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null
+  }
+
+  const token = authHeader.substring(7)
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+  const { data, error } = await supabase.auth.getUser(token)
+
+  if (error || !data.user) {
+    return null
+  }
+
+  return data.user
+}
+
 // POST - Insert activities (legacy, for batch sync)
 export async function POST(request: NextRequest) {
   try {
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const body = await request.json()
     const { activities } = body
 
@@ -36,12 +67,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey)
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     const { data, error } = await supabase
       .from('tab_activity')
       .insert(activities.map((a: Activity) => ({
-        user_id: a.user_id,
+        user_id: user.id, // Use authenticated user's ID, not from request
         url: a.url,
         title: a.title,
         domain: a.domain,
@@ -65,19 +96,24 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { domain, user_id } = body
-
-    if (!domain || !user_id) {
-      return NextResponse.json({ error: 'Missing domain or user_id' }, { status: 400 })
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey)
+    const body = await request.json()
+    const { domain } = body
+
+    if (!domain) {
+      return NextResponse.json({ error: 'Missing domain' }, { status: 400 })
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     const { error } = await supabase
       .from('tab_activity')
       .delete()
-      .eq('user_id', user_id)
+      .eq('user_id', user.id) // Use authenticated user's ID
       .eq('domain', domain)
 
     if (error) {
@@ -94,14 +130,12 @@ export async function DELETE(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('userId')
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -109,7 +143,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from('tab_activity')
       .select('*')
-      .eq('user_id', userId)
+      .eq('user_id', user.id) // Use authenticated user's ID, not from query params
       .gte('started_at', today.toISOString())
       .order('started_at', { ascending: false })
 
@@ -148,20 +182,25 @@ export async function GET(request: NextRequest) {
 // PUT - Upsert a tab (insert or update if exists)
 export async function PUT(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { user_id, url, title, domain, started_at } = body
-
-    if (!user_id || !url) {
-      return NextResponse.json({ error: 'Missing user_id or url' }, { status: 400 })
+    const user = await getAuthenticatedUser(request)
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey)
+    const body = await request.json()
+    const { url, title, domain, started_at } = body
+
+    if (!url) {
+      return NextResponse.json({ error: 'Missing url' }, { status: 400 })
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     // First, check if an entry with this URL already exists for this user
     const { data: existing } = await supabase
       .from('tab_activity')
       .select('*')
-      .eq('user_id', user_id)
+      .eq('user_id', user.id) // Use authenticated user's ID
       .eq('url', url)
       .maybeSingle()
 
@@ -186,7 +225,7 @@ export async function PUT(request: NextRequest) {
       const { error: insertError } = await supabase
         .from('tab_activity')
         .insert({
-          user_id,
+          user_id: user.id, // Use authenticated user's ID
           url,
           title,
           domain,

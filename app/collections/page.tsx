@@ -34,7 +34,6 @@ export default function CollectionsPage() {
               </svg>
               Add Collection
             </Button>
-            <Button onClick={() => (document as typeof document & { getElementById: (id: string) => { click?: () => void } | null }).getElementById('add-collection-btn')?.click()}>+ New Collection</Button>
           </div>
         </div>
         <Suspense fallback={

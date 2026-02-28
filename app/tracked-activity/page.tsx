@@ -62,19 +62,16 @@ export default function TrackedActivityPage() {
     if (!confirmed) return
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
 
-      const response = await fetch('/api/activity/clear-old', {
+      const response = await fetch('/api/activity/clear', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-        'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+          'Authorization': `Bearer ${session.access_token}`
         },
-        body: JSON.stringify({
-          user_id: user.id,
-          olderThan: new Date().toISOString()
-        })
+        body: JSON.stringify({})
       })
 
       if (response.ok) {
@@ -100,37 +97,50 @@ export default function TrackedActivityPage() {
   }
 
   const fetchActivities = async () => {
-    if (!userId) return
     setLoading(true)
 
-    // Use the list API which returns only the latest entry per tab per session
-    const response = await fetch('/api/activity/list', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId })
-    })
-
-    if (response.ok) {
-      const result = await response.json()
-      if (result.success && result.data) {
-        setActivities(result.data)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        router.push('/login')
+        return
       }
+
+      // Use the list API which returns only the latest entry per tab per session
+      const response = await fetch('/api/activity/list', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({})
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success && result.data) {
+          setActivities(result.data)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch activities:', error)
     }
 
     setLoading(false)
   }
 
   const checkTrackingStatus = () => {
-    if (typeof window !== 'undefined' && (window as any).chrome?.runtime) {
+    const chromeWindow = window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb: (r: { isTracking?: boolean } | undefined) => void) => void; lastError?: { message?: string } } } }
+    if (typeof window !== 'undefined' && chromeWindow.chrome?.runtime) {
       const extensionId = getExtensionId()
       if (!extensionId) return
 
-      ;(window as any).chrome.runtime.sendMessage(
+      chromeWindow.chrome.runtime?.sendMessage?.(
         extensionId,
         { action: 'getStatus' },
-        (response: any) => {
-          if (response && !(window as any).chrome.runtime.lastError) {
-            setIsTracking(response.isTracking)
+        (response: { isTracking?: boolean } | undefined) => {
+          if (response && !(chromeWindow.chrome?.runtime?.lastError)) {
+            if (response.isTracking !== undefined) setIsTracking(response.isTracking)
           }
         }
       )
@@ -147,16 +157,9 @@ export default function TrackedActivityPage() {
   useEffect(() => {
     getCurrentUser()
     checkExtensionStatus()
+    fetchActivities()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    if (userId) {
-      fetchActivities()
-      checkTrackingStatus()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId])
 
   const formatDuration = (seconds: number) => {
     if (seconds < 60) return `${seconds}s`

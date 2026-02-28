@@ -188,7 +188,9 @@ export function Sidebar() {
                 }
               }}
             >
-              <Icon className="w-6 h-6" style={{ color: isActive ? 'white' : item.color }} />
+              <span style={{ color: isActive ? 'white' : item.color }}>
+                <Icon className="w-6 h-6" />
+              </span>
               <span className="text-base font-semibold">{item.label}</span>
               {isActive && (
                 <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white animate-pulse" />

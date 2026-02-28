@@ -84,7 +84,7 @@ export function ReadingListContent() {
         setIsGuest(true)
         markGuestMode()
         try {
-          const storedBookmarks: Bookmark[] = guestStoreGet(GUEST_KEYS.BOOKMARKS) || []
+          const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS) || []
           if (storedBookmarks.length > 0) {
             const readingList = storedBookmarks.filter((b: Bookmark) => !b.is_read)
             setBookmarks(readingList)
@@ -135,7 +135,7 @@ export function ReadingListContent() {
     try {
       const { data: { session } } = await supabase.auth.getSession()
       // Try different possible locations for the token
-      const token = session?.access_token || session?.session?.access_token
+      const token = session?.access_token
 
       if (!token) {
         setLoadingSemantic(false)
@@ -167,7 +167,7 @@ export function ReadingListContent() {
     const { data: { session } } = await supabase.auth.getSession()
 
     // Try different possible locations for the token
-    let token = session?.access_token || session?.session?.access_token
+    let token = session?.access_token
 
     // If still no token, try getting from current session
     if (!token) {
@@ -209,7 +209,7 @@ export function ReadingListContent() {
     // Remove from reading list (set is_read = true)
     if (isGuest) {
       try {
-        const storedBookmarks: Bookmark[] = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (storedBookmarks) {
           const updatedBookmarks = storedBookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, is_read: true } : b)
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedBookmarks)
@@ -234,7 +234,7 @@ export function ReadingListContent() {
     // Add to reading list (set is_read = false)
     if (isGuest) {
       try {
-        const storedBookmarks: Bookmark[] = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (storedBookmarks) {
           const updatedBookmarks = storedBookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, is_read: false } : b)
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedBookmarks)
@@ -255,7 +255,7 @@ export function ReadingListContent() {
   const updateNotes = async (bookmark: Bookmark, notes: string) => {
     if (isGuest) {
       try {
-        const storedBookmarks: Bookmark[] = guestStoreGet(GUEST_KEYS.BOOKMARKS)
+        const storedBookmarks = guestStoreGet<Bookmark[]>(GUEST_KEYS.BOOKMARKS)
         if (storedBookmarks) {
           const updatedBookmarks = storedBookmarks.map((b: Bookmark) => b.id === bookmark.id ? { ...b, notes } : b)
           guestStoreSet(GUEST_KEYS.BOOKMARKS, updatedBookmarks)

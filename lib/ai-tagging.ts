@@ -256,20 +256,21 @@ Now generate tags for the given bookmark.`
     }
 
     return tags
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Handle different error types
-    if (error?.code === 'ETIMEDOUT' || error?.message?.includes('timeout')) {
-      console.error('[AI] Request timeout:', error.message)
+    const err = error as { code?: string; message?: string; status?: number }
+    if (err.code === 'ETIMEDOUT' || err.message?.includes('timeout')) {
+      console.error('[AI] Request timeout:', err.message)
       return useFallback ? generateFallbackTags(title, url) : []
     }
 
-    if (error?.status === 429) {
+    if (err.status === 429) {
       console.error('[AI] Rate limit exceeded')
       return useFallback ? generateFallbackTags(title, url) : []
     }
 
-    if (error?.status >= 500) {
-      console.error('[AI] Server error:', error?.message)
+    if (err.status && err.status >= 500) {
+      console.error('[AI] Server error:', err.message)
       return useFallback ? generateFallbackTags(title, url) : []
     }
 
@@ -333,7 +334,11 @@ export async function applyAiTagsToBookmark(
   // 7. Return suggestions for UI
   const suggested: TagSuggestion[] = [
     ...matched.map((m) => {
-      const existingTag = existingTags?.find((t) => t.id === m.existingTag.id)!
+      const existingTag = existingTags?.find((t) => t.id === m.existingTag.id)
+      if (!existingTag) {
+        // Should not happen since matched is derived from existingTags
+        return { id: m.existingTag.id, name: m.existingTag.name, color: '#6b7280', user_id: '', created_at: '', isNew: false }
+      }
       return { ...existingTag, isNew: false }
     }),
     ...createdTags.map((t) => ({ ...t, isNew: true })),
@@ -392,16 +397,17 @@ Now expand this query: "${query}"`
 
     // Always include the original query first
     return [query, ...expanded.filter((t: string) => t !== query)]
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Log and fall back to basic expansion
-    if (error?.code === 'ETIMEDOUT' || error?.message?.includes('timeout')) {
+    const err = error as { code?: string; message?: string; status?: number }
+    if (err.code === 'ETIMEDOUT' || err.message?.includes('timeout')) {
       console.warn('[AI] Expansion timeout, using basic expansion')
-    } else if (error?.status === 429) {
+    } else if (err.status === 429) {
       console.warn('[AI] Expansion rate limited, using basic expansion')
     } else if (error instanceof SyntaxError) {
       console.warn('[AI] Invalid expansion response, using basic expansion')
     } else {
-      console.warn('[AI] Expansion error:', error?.message || error)
+      console.warn('[AI] Expansion error:', err.message || error)
     }
 
     return basicQueryExpansion(query)
@@ -474,7 +480,7 @@ export async function cleanupUnusedTags(userId: string): Promise<number> {
 }
 
 // Get all bookmarks with their tags for a user
-export async function getBookmarksWithTags(userId: string): Promise<any[]> {
+export async function getBookmarksWithTags(userId: string): Promise<Array<{ bookmark_tags: Array<{ tags: unknown }> | null } & Record<string, unknown>>> {
   const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
   const { data: bookmarks } = await supabase
