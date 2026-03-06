@@ -1,97 +1,147 @@
-# WorkStack - Project Overview
+# WorkStack
 
-WorkStack is a personal bookmark and activity management platform that helps users organize their digital life and track their browsing habits.
+The intelligent bookmark and activity management platform for productive teams.
 
-## Core Features
+---
 
-### 📌 Bookmark Management
-- **Save Bookmarks** - Store any URL with title, description, and notes
-- **Folder Organization** - Group bookmarks into folders for better organization
-- **Collections** - Create collections to group bookmarks across folders
-- **Share Collections** - Generate shareable links for your bookmark collections
-- **Auto-Tagging (AI)** - Automatically assigns relevant tags to new bookmarks
-- **Search** - Full-text search across titles, URLs, descriptions, and tags
+## Overview
 
-### 🏷️ Tags System
-- **Manual Tagging** - Add custom tags to any bookmark
-- **Tag Suggestions** - AI suggests relevant tags based on bookmark content
-- **Colored Tags** - Each tag has a unique color for visual identification
-- **Tag Management** - Create, edit, and delete tags
-- **Filter by Tags** - Find bookmarks quickly using tag filters
+WorkStack is a modern bookmark management and browsing activity platform designed for professionals who need to organize, search, and share web resources efficiently. Powered by AI-driven semantic search and intelligent auto-tagging, WorkStack transforms how teams discover and leverage their collective web knowledge.
 
-### 📚 Reading List
-- **Semantic Search (AI)** - Find similar bookmarks using AI-powered semantic understanding
-- **Smart Recommendations** - Get AI-powered bookmark suggestions based on your library
-- **Read/Unread Status** - Track which bookmarks you've read
+### Why WorkStack?
 
-### 📊 Activity Tracking
-- **Browser Extension** - Chrome/Edge/Brave extension tracks your browsing
-- **Time Tracking** - See how much time you spend on each website
-- **Session History** - View and restore previously tracked tabs
-- **Statistics** - Daily, weekly, and monthly activity summaries
-- **Pause/Resume** - Control when tracking is active
+- **AI-Powered Discovery**: Find content by meaning, not just keywords. Search "ferrari" and get results for "car"
+- **Seamless Collaboration**: Share curated collections with your team via secure, shareable links
+- **Activity Intelligence**: Understand browsing patterns with built-in time tracking and session analytics
+- **Privacy-First**: Guest mode available. No account required to try. Your data, your control.
 
-### 🔍 Smart Search
-- **AI Semantic Search** - Search by meaning, not just keywords (e.g., "car" finds "ferrari")
-- **Multi-Mode Search**
-  - All - Searches everything including AI-expanded terms
-  - Semantic AI - Understands meaning and context
-  - Tags - Search only within tags
-  - Name - Search titles and URLs
-- **Instant Results** - Real-time search with no lag for non-AI modes
+---
 
-### 👤 User Accounts
-- **Guest Mode** - Try the app without signing up (data stored locally)
-- **Full Account** - Sign up/login for cloud sync across devices
-- **Data Sync** - Seamlessly sync guest data when you create an account
+## Features
 
-## How It Works
+### 💾 Intelligent Bookmark Management
 
-### Saving Bookmarks
-1. Click "Add Bookmark" or use the browser extension
-2. Enter URL (title, description, notes are optional)
-3. Select folder and/or collection
-4. AI automatically tags your bookmark in the background
+| Feature | Description |
+|---------|-------------|
+| **Smart Capture** | Save any URL with auto-fetched titles, descriptions, and metadata |
+| **AI Auto-Tagging** | Automatically assigns relevant tags using Groq AI |
+| **Collections** | Organize bookmarks across folders into shareable collections |
+| **Bulk Operations** | Import, export, and manage multiple bookmarks efficiently |
+| **Full-Text Search** | Instant search across titles, URLs, descriptions, and tags |
 
-### Organizing with Collections
-1. Create a collection for any topic (e.g., "Research", "Recipes", "Dev Tools")
-2. Add existing bookmarks to multiple collections
-3. Share collections with others via a unique link
+### 🧠 Semantic Search Engine
 
-### Tracking Activity
-1. Install the browser extension (Chrome, Edge, or Brave)
-2. Click "Start Tracking" on the dashboard
-3. Browse normally - extension tracks which tabs you visit
-4. View your activity stats and history on the Tracked Activity page
-5. Restore previous sessions to reopen all tracked tabs
+```typescript
+// Traditional search: "ferrari" → finds "ferrari"
+// Semantic search:  "ferrari" → finds "ferrari", "car", "sports car", "italian automotive"
+```
 
-### Finding Content
-- Use **Smart Search** for AI-powered semantic search
-- Filter by **tags** for quick access to categorized bookmarks
-- Browse by **folders** or **collections** for organized viewing
+- **Multi-Mode Search**: All, Semantic AI, Tags, and Name search modes
+- **Real-Time Results**: Instant feedback for non-AI modes
+- **Context-Aware**: Understands meaning and relationships between concepts
 
-## Platform Features
+### 📊 Browsing Activity Tracking
 
-### Mobile Responsive
-- Hamburger menu navigation
-- Touch-friendly interface
-- Optimized for smaller screens
+- **Cross-Platform Extension**: Chrome, Edge, and Brave support
+- **Session Persistence**: Restore your browsing session across devices
+- **Time Analytics**: Daily, weekly, and monthly activity summaries
+- **Privacy Controls**: Pause/resume tracking with one click
 
-### Browser Compatibility
-- **Chrome** - Full support including extension
-- **Microsoft Edge** - Full support including extension
-- **Brave** - Full support including extension
-- **Safari** - Web app only (no extension support)
-- **Firefox** - Web app only (no extension support)
-- **Mobile Browsers** - Web app only (no extension support)
+### 👥 Collaboration & Sharing
 
-### Theme Support
-- Light mode (default)
-- Dark mode
-- System-based theme switching
+- **Public Collections**: Share curated resources via unique URLs
+- **Guest Access**: View shared collections without signing up
+- **Real-Time Sync**: Changes sync instantly across all devices
 
-## Data Privacy
-- All user data stored in personal account
-- Guest data stored locally until account is created
-- Extension can be paused for privacy
-- No third-party tracking
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+ and npm/yarn/pnpm
+- A Supabase project (free tier works)
+- A Groq API key (for AI features)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/Aaryan0091/WorskStack.git
+cd WorkStack
+
+# Install dependencies
+npm install
+
+# Set up environment variables
+cp .env.example .env.local
+# Edit .env.local with your credentials
+
+# Run the development server
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Environment Variables
+
+```bash
+# Supabase (Required)
+NEXT_PUBLIC_SUPABASE_URL=your-project-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_KEY=your-service-role-key
+
+# Groq AI (Required for AI features)
+GROQ_API_KEY=your-groq-api-key
+
+# Optional
+NEXT_PUBLIC_EXTENSION_ID=your-extension-id
+NEXT_PUBLIC_APP_URL=https://your-domain.com
+```
+
+---
+
+## Tech Stack
+
+| Category | Technology |
+|----------|------------|
+| **Frontend** | Next.js 16, React 19, TypeScript 5 |
+| **Styling** | Tailwind CSS, CSS Variables |
+| **Backend** | Next.js API Routes, Supabase |
+| **Database** | PostgreSQL (via Supabase) |
+| **Auth** | Supabase Auth |
+| **AI** | Groq API for semantic search & tagging |
+| **Extension** | Chrome Extension Manifest V3 |
+
+---
+
+## Roadmap
+
+- [ ] Mobile apps (iOS & Android)
+- [ ] Team workspaces with role-based access
+- [ ] Browser extensions for Safari & Firefox
+- [ ] API for third-party integrations
+- [ ] Advanced analytics dashboard
+- [ ] Dark mode system-wide
+
+---
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## License
+
+This project is licensed under the MIT License.
+
+## Support
+
+For questions or feedback, please open an issue on GitHub.
