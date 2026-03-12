@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useMemo, lazy, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { getExtensionId, isExtensionInstalledViaContentScript, requestExtensionIdFromContentScript } from '@/lib/extension-detect'
+import { getExtensionId, isExtensionInstalledViaContentScript, requestExtensionIdFromContentScript, isExtensionInstalled, checkExtensionLocal } from '@/lib/extension-detect'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -292,7 +292,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       setLoading(false)
 
       // Check extension status regardless of login state
-      checkExtensionInstalled()
+      checkExtensionLocal()
 
       // Only store token and set up subscription if logged in
       if (user) {
@@ -340,6 +340,16 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
         setBookmarks([])
         setCollections([])
         setCounts({ totalBookmarks: 0, favoritesCount: 0, unreadCount: 0 })
+        setHasSavedSession(false)
+        setHasServerActivity(false)
+        // Notify extension to clear userId and saved session
+        const chrome = (window as typeof window & { chrome?: { runtime?: { sendMessage?: (id: string, msg: Record<string, unknown>, cb?: () => void) => void; lastError?: { message?: string } } } }).chrome
+        if (chrome?.runtime) {
+          const extensionId = getExtensionId()
+          if (extensionId) {
+            chrome.runtime.sendMessage?.(extensionId, { action: 'clearUserData' })
+          }
+        }
       }
       if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         // Use the session from the event directly
@@ -428,7 +438,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     }
   }
 
-  const checkExtensionInstalled = async () => {
+  const checkExtensionInitial = async () => {
     if (typeof window === 'undefined') {
       setExtensionInstalled(false)
       return
@@ -450,7 +460,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
     // Second check: Actively request extension ID from content script via postMessage.
     // The content script may have announced before our listener was ready (race condition),
     // so we explicitly ask and wait for a response.
-    const extensionIdFromCS = await requestExtensionIdFromContentScript(1500)
+    const extensionIdFromCS: string | null = await requestExtensionIdFromContentScript(3000)
     if (extensionIdFromCS) {
       setExtensionInstalled(true)
       if (checkIntervalRef.current) clearInterval(checkIntervalRef.current)
@@ -535,11 +545,32 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
       router.push('/login')
       return
     }
+
+    // Re-check extension status when user clicks Track Activity
+    const recheckResult: boolean = await checkExtensionLocal()
+    if (recheckResult) {
+      // Extension is now detected - proceed with tracking
+      setShowPermissionModal(true)
+      return
+    }
+
+    // Extension still not detected - show modal
     if (extensionInstalled === false) {
       setShowExtensionModal(true)
       return
     }
-    setShowPermissionModal(true)
+
+    // Extension might be in false state even though it's installed
+    // Try one more check before showing modal
+    const finalCheck: boolean = await checkExtensionLocal()
+    if (finalCheck) {
+      // Extension detected after re-check - proceed
+      setShowPermissionModal(true)
+      return
+    }
+
+    // Still not detected - show modal
+    setShowExtensionModal(true)
   }
 
   const confirmStartTracking = async () => {
@@ -863,7 +894,7 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
                 >
                   <span>🎯 Track Activity</span>
                 </button>
-                {(hasSavedSession || hasServerActivity) && (
+                {!isGuest && (hasSavedSession || hasServerActivity) && (
                   <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                     {hasSavedSession && (
                       <button
@@ -1170,14 +1201,14 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
           </div>
           <div className="p-4 rounded-lg" style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)' }}>
             <p className="text-sm" style={{ color: '#1e40af' }}>
-              <strong>Note:</strong> The extension folder is at <code className="bg-white px-1 rounded">/Users/aaryangupta/Desktop/workstack-extension/</code>
+              <strong>Note:</strong> Make sure you've installed the WorkStack extension in your browser before starting tracking.
             </p>
           </div>
           <div className="flex gap-3">
             <Button onClick={() => setShowExtensionModal(false)} className="flex-1">Got it</Button>
             <Button variant="secondary" onClick={() => {
               setShowExtensionModal(false)
-              checkExtensionInstalled()
+              checkExtensionLocal()
             }} className="flex-1">I&apos;ve Installed It</Button>
           </div>
         </div>

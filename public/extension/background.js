@@ -9,6 +9,7 @@ let userId = null
 let authToken = null
 let apiBaseUrl = null  // Will be set from storage or from website
 let hasSavedSession = false
+let savedSessionUserId = null  // Track which user owns the saved session
 let trackingSessionId = null
 
 // Track the currently active tab
@@ -62,13 +63,18 @@ function queueApiCall(tabId, operation) {
 }
 
 // Initialize from storage
-chrome.storage.local.get(['isTracking', 'isPaused', 'userId', 'authToken', 'apiBaseUrl', 'savedSessionTabs'], (result) => {
+chrome.storage.local.get(['isTracking', 'isPaused', 'userId', 'authToken', 'apiBaseUrl', 'savedSessionTabs', 'savedSessionUserId'], (result) => {
   if (result.isTracking) isTracking = result.isTracking
   if (result.isPaused) isPaused = result.isPaused
   if (result.userId) userId = result.userId
   if (result.authToken) authToken = result.authToken
   if (result.apiBaseUrl) apiBaseUrl = result.apiBaseUrl
-  hasSavedSession = result.savedSessionTabs && result.savedSessionTabs.length > 0
+  if (result.savedSessionUserId) savedSessionUserId = result.savedSessionUserId
+  // Only set hasSavedSession if saved session belongs to current user
+  const savedUserId = result.savedSessionUserId
+  const currentUserId = result.userId
+  hasSavedSession = result.savedSessionTabs && result.savedSessionTabs.length > 0 &&
+    (!savedUserId || savedUserId === currentUserId)
 
   // Restore tracking session if tracking was active
   if (isTracking && userId && authToken) {
@@ -238,8 +244,12 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
   } else if (request.action === 'stopTracking') {
     stopTracking(() => {
       // Callback after session is saved
-      chrome.storage.local.get(['savedSessionTabs'], (result) => {
-        sendResponse({ success: true, hasSavedSession: result.savedSessionTabs && result.savedSessionTabs.length > 0 })
+      chrome.storage.local.get(['savedSessionTabs', 'savedSessionUserId', 'userId'], (result) => {
+        const savedUserId = result.savedSessionUserId
+        const currentUserId = result.userId
+        const hasValidSavedSession = result.savedSessionTabs && result.savedSessionTabs.length > 0 &&
+          (!savedUserId || savedUserId === currentUserId)
+        sendResponse({ success: true, hasSavedSession: hasValidSavedSession })
       })
     })
     return true
@@ -267,13 +277,18 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
   } else if (request.action === 'getStatus') {
     const tabs = getActiveTabsArray()
     // Always check storage for hasSavedSession to ensure accurate state
-    chrome.storage.local.get(['savedSessionTabs'], (result) => {
+    chrome.storage.local.get(['savedSessionTabs', 'savedSessionUserId', 'userId'], (result) => {
       const savedSessionExists = result.savedSessionTabs && result.savedSessionTabs.length > 0
-      hasSavedSession = savedSessionExists
+      const savedUserId = result.savedSessionUserId
+      const currentUserId = result.userId
+      // Only show hasSavedSession if saved session belongs to current user
+      const hasValidSavedSession = savedSessionExists &&
+        (!savedUserId || savedUserId === currentUserId)
+      hasSavedSession = hasValidSavedSession
       sendResponse({
         isTracking,
         isPaused,
-        hasSavedSession: savedSessionExists,
+        hasSavedSession: hasValidSavedSession,
         isAutomaticMode,
         sessionTabs: tabs
       })
@@ -281,13 +296,46 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
     return true
   } else if (request.action === 'ping') {
     sendResponse({ success: true, version: '4.3.0' })
+  } else if (request.action === 'clearUserData') {
+    // Clear user data on logout
+    userId = null
+    authToken = null
+    savedSessionUserId = null
+    hasSavedSession = false
+    tabTimes.clear()
+    currentTabId = null
+    currentTabStartTime = null
+    chrome.storage.local.set({
+      userId: null,
+      authToken: null,
+      savedSessionUserId: null,
+      savedSessionTabs: [],
+      savedSessionAt: null,
+      isTracking: false,
+      isPaused: false
+    })
+    chrome.action.setBadgeText({ text: '' })
+    sendResponse({ success: true })
   } else if (request.action === 'openUrls') {
     openUrls(request.urls)
     sendResponse({ success: true })
   } else if (request.action === 'storeAuthToken') {
     authToken = request.authToken
     apiBaseUrl = request.apiBaseUrl || apiBaseUrl
-    chrome.storage.local.set({ authToken, apiBaseUrl })
+    // Extract userId from JWT token and store it
+    let userIdFromToken = null
+    try {
+      const payload = JSON.parse(atob(authToken.split('.')[1]))
+      userIdFromToken = payload.sub || payload.user_id
+    } catch {
+      // Failed to parse token, use existing userId from storage
+    }
+    if (userIdFromToken) {
+      userId = userIdFromToken
+      chrome.storage.local.set({ authToken, apiBaseUrl, userId })
+    } else {
+      chrome.storage.local.set({ authToken, apiBaseUrl })
+    }
     sendResponse({ success: true })
   } else if (request.action === 'getOpenTabs') {
     chrome.tabs.query({}, (allTabs) => {
@@ -309,10 +357,15 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getStatus') {
+    // Check if saved session belongs to current user
+    const savedUserId = savedSessionUserId
+    const currentUserId = userId
+    const hasValidSavedSession = hasSavedSession &&
+      (!savedUserId || savedUserId === currentUserId)
     sendResponse({
       isTracking,
       isPaused,
-      hasSavedSession,
+      hasSavedSession: hasValidSavedSession,
       sessionTabs: getActiveTabsArray()
     })
     return true
@@ -338,7 +391,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'storeAuthToken') {
     authToken = request.authToken
     apiBaseUrl = request.apiBaseUrl || apiBaseUrl
-    chrome.storage.local.set({ authToken, apiBaseUrl })
+    // Extract userId from JWT token and store it
+    let userIdFromToken = null
+    try {
+      const payload = JSON.parse(atob(authToken.split('.')[1]))
+      userIdFromToken = payload.sub || payload.user_id
+    } catch {
+      // Failed to parse token, use existing userId from storage
+    }
+    if (userIdFromToken) {
+      userId = userIdFromToken
+      chrome.storage.local.set({ authToken, apiBaseUrl, userId })
+    } else {
+      chrome.storage.local.set({ authToken, apiBaseUrl })
+    }
+    sendResponse({ success: true })
+  } else if (request.action === 'clearUserData') {
+    // Clear user data on logout
+    userId = null
+    authToken = null
+    savedSessionUserId = null
+    hasSavedSession = false
+    tabTimes.clear()
+    currentTabId = null
+    currentTabStartTime = null
+    chrome.storage.local.set({
+      userId: null,
+      authToken: null,
+      savedSessionUserId: null,
+      savedSessionTabs: [],
+      savedSessionAt: null,
+      isTracking: false,
+      isPaused: false
+    })
+    chrome.action.setBadgeText({ text: '' })
     sendResponse({ success: true })
   }
   return true
@@ -424,7 +510,8 @@ function stopTracking(callback) {
       hasSavedSession = true
       chrome.storage.local.set({
         savedSessionTabs: currentTabs,
-        savedSessionAt: new Date().toISOString()
+        savedSessionAt: new Date().toISOString(),
+        savedSessionUserId: userId  // Store userId to verify on resume
       })
     } else {
       hasSavedSession = false
@@ -464,12 +551,24 @@ function resumeTracking() {
 }
 
 function resumeActivity() {
-  chrome.storage.local.get(['savedSessionTabs', 'userId', 'authToken', 'apiBaseUrl'], (result) => {
+  chrome.storage.local.get(['savedSessionTabs', 'savedSessionUserId', 'userId', 'authToken', 'apiBaseUrl'], (result) => {
     const savedTabs = result.savedSessionTabs || []
+    const savedSessionUserId = result.savedSessionUserId
+    const currentUserId = result.userId
 
     userId = result.userId
     authToken = result.authToken
     if (result.apiBaseUrl) apiBaseUrl = result.apiBaseUrl
+
+    // Only resume activity if saved session belongs to current user
+    // This prevents showing another user's tracked activity
+    if (savedTabs.length > 0 && savedSessionUserId === currentUserId) {
+      const uniqueUrls = [...new Set(savedTabs.map(tab => tab.url))]
+      chrome.windows.create({ url: uniqueUrls, focused: true })
+    } else if (savedTabs.length > 0 && savedSessionUserId !== currentUserId) {
+      // Clear saved session from previous user
+      chrome.storage.local.set({ savedSessionTabs: [], savedSessionUserId: null, savedSessionAt: null })
+    }
 
     isTracking = true
     isPaused = false
@@ -477,18 +576,16 @@ function resumeActivity() {
     chrome.storage.local.set({ isTracking, isPaused: false })
     chrome.action.setBadgeText({ text: 'ON' })
     chrome.action.setBadgeBackgroundColor({ color: '#22c55e' })
-
-    if (savedTabs.length > 0) {
-      const uniqueUrls = [...new Set(savedTabs.map(tab => tab.url))]
-      chrome.windows.create({ url: uniqueUrls, focused: true })
-    }
   })
 }
 
 function openSavedTabs() {
-  chrome.storage.local.get(['savedSessionTabs'], (result) => {
+  chrome.storage.local.get(['savedSessionTabs', 'savedSessionUserId', 'userId'], (result) => {
     const savedTabs = result.savedSessionTabs || []
-    if (savedTabs.length === 0) return
+    const savedUserId = result.savedSessionUserId
+    const currentUserId = result.userId
+    // Only open tabs if saved session belongs to current user
+    if (savedTabs.length === 0 || (savedUserId && savedUserId !== currentUserId)) return
 
     const uniqueUrls = [...new Set(savedTabs.map(tab => tab.url))]
     chrome.windows.create({ url: uniqueUrls, focused: true })

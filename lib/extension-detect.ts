@@ -70,7 +70,7 @@ export function isExtensionInstalledViaContentScript(): boolean {
  * Request extension ID from content script via postMessage
  * Returns a promise that resolves with the extension ID or null after timeout
  */
-export function requestExtensionIdFromContentScript(timeoutMs = 2000): Promise<string | null> {
+export function requestExtensionIdFromContentScript(timeoutMs = 3000): Promise<string | null> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') {
       resolve(null)
@@ -204,7 +204,7 @@ export function sendExtensionMessage(message: ExtensionMessage): Promise<Extensi
       }
 
       const extensionId = ids[index]
-      chrome.runtime.sendMessage(extensionId, message, (response: ExtensionResponse) => {
+      chrome.runtime?.sendMessage?.(extensionId, message, (response: ExtensionResponse) => {
         if (chrome.runtime?.lastError) {
           // Try next ID
           trySend(ids, index + 1)
@@ -224,23 +224,55 @@ export function sendExtensionMessage(message: ExtensionMessage): Promise<Extensi
 
 /**
  * Check if the WorkStack extension is installed
+ * Tries multiple times with increasing delays to handle race conditions
  */
-export async function isExtensionInstalled(): Promise<boolean> {
-  try {
-    const response = await sendExtensionMessage({ action: 'ping' })
-    return response?.success === true
-  } catch {
-    return false
+export async function isExtensionInstalled(retries = 3, delayMs = 500): Promise<boolean> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await sendExtensionMessage({ action: 'ping' })
+      if (response?.success === true) {
+        return true
+      }
+    } catch {
+      // Ignore errors and retry
+    }
+    // Wait before next retry
+    if (i < retries - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
   }
+  return false
 }
 
 /**
  * Get the extension ID with a timeout
  * Useful for checking if extension is responsive
  */
-export async function checkExtensionWithTimeout(timeoutMs: number = 1000): Promise<boolean> {
+export async function checkExtensionWithTimeout(timeoutMs: number = 3000): Promise<boolean> {
   return Promise.race([
-    isExtensionInstalled(),
+    isExtensionInstalled(5, 600),
     new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs))
   ])
+}
+
+/**
+ * Check if the WorkStack extension is installed
+ * Uses a longer timeout and retry approach for better reliability
+ */
+export async function checkExtensionLocal(retries = 5, delayMs = 600): Promise<boolean> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await sendExtensionMessage({ action: 'ping' })
+      if (response?.success === true) {
+        return true
+      }
+    } catch {
+      // Ignore errors and retry
+    }
+    // Wait before next retry
+    if (i < retries - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+  }
+  return false
 }

@@ -24,7 +24,7 @@ export default function ExtensionPage() {
     // Check for extension on mount
     checkExtensionInstalled()
 
-    // Listen for the custom event from content script
+    // Listen for custom event from content script
     const handleExtensionLoaded = () => {
       setExtensionInstalled(true)
     }
@@ -49,11 +49,12 @@ export default function ExtensionPage() {
   }, [])
 
   // Calculate scale based on scroll (1.5 at top, 1 at 100px scroll)
-  const scale = Math.max(1, 1.5 - scrollY / 200)
-  const opacity = Math.max(0.7, 1 - scrollY / 500)
+  // Only apply animation after component is mounted to avoid hydration mismatch
+  const scale = mounted ? Math.max(1, 1.5 - scrollY / 200) : 1
+  const opacity = mounted ? Math.max(0.7, 1 - scrollY / 500) : 1
 
   const checkExtensionInstalled = async () => {
-    // First check if the content script marker is set (fastest)
+    // First check if content script marker is set (fastest)
     if (isExtensionInstalledViaContentScript()) {
       setExtensionInstalled(true)
       return
@@ -147,7 +148,7 @@ export default function ExtensionPage() {
                   Extension Installed!
                 </h2>
                 <p className="mb-6" style={{ color: 'var(--text-secondary)' }}>
-                  You&rsquo;re all set! The WorkStack extension is ready to use.
+                  You are all set! The WorkStack extension is ready to use.
                 </p>
                 <button
                   onClick={() => router.push('/')}
@@ -227,7 +228,7 @@ export default function ExtensionPage() {
                 </div>
                 <div className="flex-1">
                   <h3 className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                    Download the Extension
+                    Download Extension
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
                     Click the download button above to get the extension ZIP file.
@@ -245,16 +246,16 @@ export default function ExtensionPage() {
                 </div>
                 <div className="flex-1">
                   <h3 className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                    Extract the ZIP File
+                    Extract ZIP File
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
                     Find <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">workstack-extension.zip</code> in your Downloads folder and extract it.
                   </p>
                   <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    💡 <strong>Right-click</strong> the ZIP file → <strong>&ldquo;Extract All&rdquo;</strong> (Windows) or <strong>double-click</strong> to extract (Mac)
+                    💡 Right-click ZIP file → "Extract All" (Windows) or double-click to extract (Mac)
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    📁 You&apos;ll get a <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">workstack-extension</code> folder - remember its location!
+                    📁 You will get a <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">workstack-extension</code> folder - remember its location!
                   </p>
                 </div>
               </div>
@@ -269,7 +270,7 @@ export default function ExtensionPage() {
                     Open Extensions Page
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                    Click a card below to copy the URL, then paste it in your browser&apos;s address bar:
+                    Click a card below to copy the URL, then paste it in your browser address bar:
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
@@ -308,7 +309,7 @@ export default function ExtensionPage() {
                     Enable Developer Mode
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                    Look for the &ldquo;Developer mode&rdquo; toggle in the top-right corner and turn it on.
+                    Look for "Developer mode" toggle in the top-right corner and turn it on.
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                     💡 This allows you to load unpacked extensions from your computer
@@ -323,16 +324,16 @@ export default function ExtensionPage() {
                 </div>
                 <div className="flex-1">
                   <h3 className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                    Load the Extension
+                    Load Extension
                   </h3>
                   <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-                    Click &ldquo;Load unpacked&rdquo; and select the extracted extension folder.
+                    Click "Load unpacked" and select the extracted extension folder.
                   </p>
                   <div className="p-4 rounded-lg border-2 border-dashed flex items-center justify-center gap-3" style={{ borderColor: 'var(--border-color)' }}>
                     <svg className="w-8 h-8" style={{ color: 'var(--text-secondary)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V4a2 2 0 012-2h6l2 2h6a2 2 0 012 2v2" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v2" />
                     </svg>
-                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Select the <code className="px-2 py-1 rounded">workstack-extension</code> folder</span>
+                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Select workstack-extension folder</span>
                   </div>
                 </div>
               </div>
@@ -340,11 +341,61 @@ export default function ExtensionPage() {
           </div>
         )}
 
+        {/* Troubleshooting */}
+        <div className="rounded-xl shadow-lg p-8 mb-8 border-2" style={{ backgroundColor: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.2)' }}>
+          <h2 className="text-2xl font-bold mb-6 flex items-center gap-2" style={{ color: '#f59e0b' }}>
+            <span>🔧</span>
+            Troubleshooting
+          </h2>
+
+          <div className="space-y-4">
+            {/* Issue 1 */}
+            <div className="p-4 rounded-lg" style={{ backgroundColor: 'var(--bg-primary)' }}>
+              <h3 className="font-semibold mb-2 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-red-500">❓</span>
+                Extension installed but not detected?
+              </h3>
+              <ol className="list-decimal list-inside space-y-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                <li><strong>Reload extension:</strong> Go to brave://extensions/ or chrome://extensions/ and click the refresh icon on the WorkStack extension card</li>
+                <li><strong>Refresh page:</strong> After reloading the extension, refresh your WorkStack tab</li>
+                <li><strong>Check URL:</strong> Make sure you are visiting https://workstack.vercel.app (not with www)</li>
+                <li><strong>Disable Brave Shields:</strong> Click the Brave Shields icon and set it to "Do not block anything" for the WorkStack site</li>
+              </ol>
+            </div>
+
+            {/* Issue 2 */}
+            <div className="p-4 rounded-lg" style={{ backgroundColor: 'var(--bg-primary)' }}>
+              <h3 className="font-semibold mb-2 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-red-500">❓</span>
+                Getting errors in extension?
+              </h3>
+              <ol className="list-decimal list-inside space-y-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                <li>Open Developer Tools (F12) and go to the Console tab</li>
+                <li>Look for red errors related to the extension</li>
+                <li>In the extensions page, click Service worker on the WorkStack extension card to see background script errors</li>
+              </ol>
+            </div>
+
+            {/* Issue 3 */}
+            <div className="p-4 rounded-lg" style={{ backgroundColor: 'var(--bg-primary)' }}>
+              <h3 className="font-semibold mb-2 flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-red-500">❓</span>
+                Still not working?
+              </h3>
+              <ol className="list-decimal list-inside space-y-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                <li><strong>Remove and reinstall:</strong> Click Remove on the extension card, then load it again from the extracted folder</li>
+                <li><strong>Check browser compatibility:</strong> Extension only works on Chrome, Edge, and Brave (not Safari or Firefox)</li>
+                <li><strong>Restart browser:</strong> Close and reopen your browser after installing the extension</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
         {/* Check Again Button - shown after installation steps */}
         {!extensionInstalled && mounted && supported && (
           <div className="text-center mb-8">
             <p className="mb-4" style={{ color: 'var(--text-secondary)' }}>
-              Already installed the extension? Click below to check again.
+              Already installed extension? Click below to check again.
             </p>
             <button
               onClick={checkExtensionInstalled}
@@ -364,13 +415,13 @@ export default function ExtensionPage() {
         {/* Features */}
         <div className="rounded-xl shadow-lg p-8 mb-8" style={{ backgroundColor: 'var(--bg-primary)' }}>
           <h2 className="text-2xl font-bold mb-6" style={{ color: 'var(--text-primary)' }}>
-            What Can You Do With the Extension?
+            What Can You Do With Extension?
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[
               { icon: '🎯', title: 'Track Activity', desc: 'Monitor which tabs you visit and time spent' },
               { icon: '📊', title: 'View Statistics', desc: 'See your browsing habits and productivity insights' },
-              { icon: '🔖', title: 'Quick Bookmark', desc: 'Save any page directly from the browser' },
+              { icon: '🔖', title: 'Quick Bookmark', desc: 'Save any page directly from browser' },
               { icon: '📂', title: 'Restore Session', desc: 'Reopen your previously tracked tabs instantly' },
               { icon: '🔒', title: 'Private & Secure', desc: 'All data stored in your personal account' },
               { icon: '⏸️', title: 'Pause Tracking', desc: 'Stop tracking whenever you need privacy' },
