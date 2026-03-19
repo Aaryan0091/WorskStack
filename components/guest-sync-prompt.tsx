@@ -9,7 +9,8 @@ import {
   markUserSignedIn,
   guestStoreGet,
   GUEST_KEYS,
-  clearGuestData
+  clearGuestData,
+  isGuestMode
 } from '@/lib/guest-storage'
 
 const SYNC_SHOWN_KEY = 'workstack_sync_prompt_shown'
@@ -41,6 +42,13 @@ export function GuestSyncPrompt() {
       // Check if we already showed the prompt
       const alreadyShown = localStorage.getItem(SYNC_SHOWN_KEY)
       if (alreadyShown) {
+        return
+      }
+
+      // Only show if user was actually in guest mode before
+      // This prevents showing the popup for brand new accounts or when
+      // old guest data exists from a different session
+      if (!isGuestMode()) {
         return
       }
 

@@ -61,15 +61,23 @@ export async function GET(request: NextRequest) {
     }
 
     // Otherwise, try to find existing default collection
-    const { data: existing } = await supabase
+    const { data: existing, error: findError } = await supabase
       .from('collections')
       .select('*')
       .eq('user_id', user.id)
-      .eq('name', 'My Collection (default)')
+      .ilike('name', 'My Collection (default)')
+      .limit(1)
       .single()
 
     if (existing) {
       const response = NextResponse.json({ collection: existing })
+      return corsHeaders(response, request)
+    }
+
+    // If we get a "PGRST116" error (no rows returned), we can proceed to create
+    // Otherwise, return the error
+    if (findError && findError.code !== 'PGRST116') {
+      const response = NextResponse.json({ error: findError.message }, { status: 500 })
       return corsHeaders(response, request)
     }
 
@@ -132,7 +140,8 @@ export async function POST(request: NextRequest) {
       .from('collections')
       .select('*')
       .eq('user_id', user.id)
-      .eq('name', 'My Collection (default)')
+      .ilike('name', 'My Collection (default)')
+      .limit(1)
       .single()
 
     if (!collection.data) {
@@ -152,10 +161,31 @@ export async function POST(request: NextRequest) {
         .single()
 
       if (newCollection.error) {
-        const response = NextResponse.json({ error: newCollection.error.message }, { status: 500 })
-        return corsHeaders(response, request)
+        // If it's a duplicate error, try to fetch the existing collection
+        const errorMsg = newCollection.error.message.toLowerCase()
+        if (errorMsg.includes('duplicate') || errorMsg.includes('unique')) {
+          // Collection was created by another request, fetch it
+          const refetched = await supabase
+            .from('collections')
+            .select('*')
+            .eq('user_id', user.id)
+            .ilike('name', 'My Collection (default)')
+            .limit(1)
+            .single()
+
+          if (refetched.data) {
+            collection = refetched
+          } else {
+            const response = NextResponse.json({ error: newCollection.error.message }, { status: 500 })
+            return corsHeaders(response, request)
+          }
+        } else {
+          const response = NextResponse.json({ error: newCollection.error.message }, { status: 500 })
+          return corsHeaders(response, request)
+        }
+      } else {
+        collection = newCollection
       }
-      collection = newCollection
     }
 
     // Check if bookmark already exists

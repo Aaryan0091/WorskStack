@@ -210,18 +210,45 @@ document.addEventListener('DOMContentLoaded', async () => {
           return
         }
 
-        // Render collection items
-        collectionList.innerHTML = collections.map(collection => `
-          <div class="collection-item" data-id="${collection.id}" data-name="${collection.name}">
-            <div class="collection-item-info">
-              <div class="collection-item-name">${escapeHtml(collection.name)}</div>
-              ${collection.description ? `<div class="collection-item-desc">${escapeHtml(collection.description)}</div>` : ''}
-            </div>
-            <span class="collection-item-badge ${collection.is_public ? 'public' : 'private'}">
-              ${collection.is_public ? 'Public' : 'Private'}
-            </span>
-          </div>
-        `).join('')
+        // Render collection items - use DOM methods to avoid CSP violations
+        collectionList.innerHTML = ''
+        collections.forEach(collection => {
+          const itemDiv = document.createElement('div')
+          itemDiv.className = 'collection-item'
+          itemDiv.dataset.id = collection.id
+          itemDiv.dataset.name = collection.name
+
+          const infoDiv = document.createElement('div')
+          infoDiv.className = 'collection-item-info'
+
+          const nameDiv = document.createElement('div')
+          nameDiv.className = 'collection-item-name'
+          nameDiv.textContent = collection.name
+          infoDiv.appendChild(nameDiv)
+
+          if (collection.description) {
+            const descDiv = document.createElement('div')
+            descDiv.className = 'collection-item-desc'
+            descDiv.textContent = collection.description
+            infoDiv.appendChild(descDiv)
+          }
+
+          itemDiv.appendChild(infoDiv)
+
+          const badgeSpan = document.createElement('span')
+          badgeSpan.className = `collection-item-badge ${collection.is_public ? 'public' : 'private'}`
+          badgeSpan.textContent = collection.is_public ? 'Public' : 'Private'
+          itemDiv.appendChild(badgeSpan)
+
+          collectionList.appendChild(itemDiv)
+
+          // Add click handler
+          itemDiv.addEventListener('click', () => {
+            const collectionId = itemDiv.dataset.id
+            const collectionName = itemDiv.dataset.name
+            addToCollection(collectionId, collectionName)
+          })
+        })
 
         // Add click handlers to collection items
         document.querySelectorAll('.collection-item').forEach(item => {
@@ -233,7 +260,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         })
 
       } catch {
-        collectionList.innerHTML = '<div class="collection-item-empty">Failed to load collections.<br>Try refreshing the page.</div>'
+        // Show empty state - use DOM methods
+        collectionList.innerHTML = ''
+        const emptyDiv = document.createElement('div')
+        emptyDiv.className = 'collection-item-empty'
+        emptyDiv.innerHTML = 'Failed to load collections.\nTry refreshing the page.'
+        collectionList.appendChild(emptyDiv)
       }
     })
     })
@@ -251,8 +283,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.storage.local.get(['authToken'], async (result) => {
         const token = result.authToken
 
-        // Show loading state
-        collectionList.innerHTML = '<div class="collection-item-loading">Adding...</div>'
+        // Show loading state - use DOM methods
+        collectionList.innerHTML = ''
+        const loadingDiv = document.createElement('div')
+        loadingDiv.className = 'collection-item-loading'
+        loadingDiv.textContent = 'Adding...'
+        collectionList.appendChild(loadingDiv)
 
       try {
         let title = tabTitle || tabUrl
@@ -300,13 +336,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     })
   }
 
-  // Helper to escape HTML
-  function escapeHtml(text) {
-    const div = document.createElement('div')
-    div.textContent = text
-    return div.innerHTML
-  }
-
   // Add as Bookmark button
   addBookmarkBtn.addEventListener('click', async () => {
     if (!tabUrl) {
@@ -325,7 +354,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Show loading state
     const originalText = addBookmarkBtn.innerHTML
-    addBookmarkBtn.innerHTML = 'Adding...'
+    addBookmarkBtn.textContent = 'Adding...'
     addBookmarkBtn.disabled = true
 
     // Get API base URL from storage

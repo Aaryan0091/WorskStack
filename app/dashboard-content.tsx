@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useMemo, lazy, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { getExtensionId, isExtensionInstalledViaContentScript, requestExtensionIdFromContentScript, checkExtensionLocal } from '@/lib/extension-detect'
+import { getExtensionId, isExtensionInstalledViaContentScript, checkExtensionLocal } from '@/lib/extension-detect'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,6 @@ function safeGetHostname(url: string): string {
 }
 
 export function DashboardContent({ initialBookmarks, initialCollections, initialStats }: { initialBookmarks: Bookmark[]; initialCollections: Collection[]; initialStats: { totalBookmarks: number; favoritesCount: number; unreadCount: number } }) {
-  const greeting = getGreeting()
   const router = useRouter()
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(initialBookmarks)
   const [collections, setCollections] = useState<Collection[]>(initialCollections)
@@ -48,6 +47,14 @@ export function DashboardContent({ initialBookmarks, initialCollections, initial
   const [isGuest, setIsGuest] = useState(false)
   const [loading, setLoading] = useState(false) // Start with loading=false for instant render
   const [isTracking, setIsTracking] = useState(false)
+
+  // Get greeting client-side only to prevent hydration mismatch
+  const [greeting, setGreeting] = useState<string>('')
+
+  useEffect(() => {
+    setGreeting(getGreeting())
+  }, [])
+
   const [isPaused, setIsPaused] = useState(false)
   const [hasSavedSession, setHasSavedSession] = useState(false)
   const [hasServerActivity, setHasServerActivity] = useState(false)

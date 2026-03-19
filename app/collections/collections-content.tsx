@@ -200,25 +200,47 @@ export function CollectionsContent({ searchQuery, setSearchQuery }: CollectionsC
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
       if (uniqueCollections.length === 0) {
-        // Create default collection
-        const { data: newCollection } = await supabase
-          .from('collections')
-          .insert({
-            name: 'My Collection (default)',
-            description: 'Your first collection',
-            is_public: false,
-            share_slug: `my-collection-${generateUUID().substring(0, 8)}`,
-            share_code: Math.random().toString(36).substring(2, 10),
-            user_id: user.id,
-          })
-          .select()
-          .single()
+        // Create default collection - this might fail due to race conditions,
+        // so we handle it gracefully by re-fetching
+        try {
+          const { data: newCollection } = await supabase
+            .from('collections')
+            .insert({
+              name: 'My Collection (default)',
+              description: 'Your first collection',
+              is_public: false,
+              share_slug: `my-collection-${generateUUID().substring(0, 8)}`,
+              share_code: Math.random().toString(36).substring(2, 10),
+              user_id: user.id,
+            })
+            .select()
+            .single()
 
-        if (newCollection) {
-          uniqueCollections.unshift(newCollection)
-          rolesMap[newCollection.id] = 'owner'
+          if (newCollection) {
+            uniqueCollections.unshift(newCollection)
+            rolesMap[newCollection.id] = 'owner'
+          }
+          setCollectionRoles(rolesMap)
+        } catch (err: unknown) {
+          // If we get a duplicate key error, it means another request
+          // already created the collection. Re-fetch to get it.
+          const errorMsg = err instanceof Error ? err.message : String(err)
+          if (errorMsg.includes('duplicate') || errorMsg.includes('unique')) {
+            const { data: refetched } = await supabase
+              .from('collections')
+              .select('*')
+              .eq('user_id', user.id)
+              .ilike('name', 'My Collection (default)')
+              .limit(1)
+              .single()
+
+            if (refetched) {
+              uniqueCollections.unshift(refetched)
+              rolesMap[refetched.id] = 'owner'
+              setCollectionRoles(rolesMap)
+            }
+          }
         }
-        setCollectionRoles(rolesMap)
       }
 
       setCollections(uniqueCollections)
